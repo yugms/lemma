@@ -1,19 +1,27 @@
+import type { Metadata } from "next";
 import { loadCatalog } from "@/lib/catalog";
 import { BuilderForm } from "@/components/builder/builder-form";
 
 export const dynamic = "force-dynamic";
 
+export const metadata: Metadata = {
+  title: "Build a set",
+  description:
+    "Pick a course, up to six topics, a difficulty and a style. Every problem is independently verified before it reaches you.",
+};
+
 export default async function BuildPage() {
   const catalog = await loadCatalog();
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Build a problem set</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Pick your topics and how you want to practice. Generation takes up to a minute or two —
-          every problem is checked before it reaches you.
+    <div className="mx-auto max-w-3xl">
+      <header className="pb-10">
+        <p className="eyebrow eyebrow-accent">New set</p>
+        <h1 className="display mt-5 text-title">Build a problem set</h1>
+        <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-muted">
+          Generation takes a minute or two. Every problem is solved
+          independently and checked before it reaches you.
         </p>
-      </div>
+      </header>
       <BuilderForm catalog={catalog} />
     </div>
   );

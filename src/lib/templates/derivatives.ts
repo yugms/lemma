@@ -1,4 +1,4 @@
-import type { GeneratedProblem } from "@/lib/ai/schemas";
+import type { GeneratedProblem, ProblemFormat } from "@/lib/ai/schemas";
 import type { Rng } from "@/lib/rng";
 import type { Template } from "@/lib/templates/types";
 import { buildChoices, expressionAnswer, signedTerm, term } from "@/lib/templates/helpers";
@@ -21,15 +21,14 @@ export const derivativeRules: Template = {
   },
 };
 
-function powerRule(rng: Rng, difficulty: number, format: "mcq" | "open" | "fill_blank"): GeneratedProblem {
+function powerRule(rng: Rng, difficulty: number, format: ProblemFormat): GeneratedProblem {
   const a = rng.nonZeroInt(-6, 6);
   const n = rng.int(3, 5);
   const b = rng.nonZeroInt(-8, 8);
   const m = difficulty === 1 ? 2 : rng.pick([2, -1, -2]);
   const c = rng.nonZeroInt(-9, 9);
 
-  const mTerm = m > 0 ? term(b, `x^{${m}}`) : `${term(b, "")}x^{${m}}`;
-  const f = `${term(a, `x^{${n}}`)}${m > 0 ? signedTerm(b, m === 1 ? "x" : `x^{${m}}`) : ` ${b >= 0 ? "+" : "-"} ${Math.abs(b)}x^{${m}}`}${signedTerm(c, "x")}`;
+  const f =`${term(a, `x^{${n}}`)}${m > 0 ? signedTerm(b, m === 1 ? "x" : `x^{${m}}`) : ` ${b >= 0 ? "+" : "-"} ${Math.abs(b)}x^{${m}}`}${signedTerm(c, "x")}`;
   const statement = `Find \\(f'(x)\\) for \\[f(x) = ${f}\\]`;
 
   const d1 = a * n;
@@ -78,7 +77,7 @@ function powerRule(rng: Rng, difficulty: number, format: "mcq" | "open" | "fill_
   return { ...base, format: "open", answer: expressionAnswer(dLatex) };
 }
 
-function chainRule(rng: Rng, difficulty: number, format: "mcq" | "open" | "fill_blank"): GeneratedProblem {
+function chainRule(rng: Rng, difficulty: number, format: ProblemFormat): GeneratedProblem {
   const a = rng.nonZeroInt(2, 5);
   const b = rng.nonZeroInt(-7, 7);
   const inner = `${a}x${signedTerm(b)}`;

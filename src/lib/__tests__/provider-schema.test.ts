@@ -7,6 +7,7 @@ import {
   SolverResultSchema,
   FeedbackResultSchema,
   EquivalenceResultSchema,
+  CoachReadSchema,
 } from "../ai/schemas";
 
 /**
@@ -21,6 +22,7 @@ describe("model JSON schemas", () => {
     ["solver", SolverResultSchema] as const,
     ["feedback", FeedbackResultSchema] as const,
     ["equivalence", EquivalenceResultSchema] as const,
+    ["coach", CoachReadSchema] as const,
   ];
 
   it("are inlined, self-contained, and carry no $schema", () => {
@@ -34,14 +36,38 @@ describe("model JSON schemas", () => {
     }
   });
 
-  it("describe the batch shape the generator expects", () => {
-    const json = jsonSchemaFor(batchSchemaFor("mcq")) as {
+  const itemProps = (format: Parameters<typeof batchSchemaFor>[0]) => {
+    const json = jsonSchemaFor(batchSchemaFor(format)) as {
       properties: { problems: { type: string; items: { properties: Record<string, unknown> } } };
     };
     expect(json.properties.problems.type).toBe("array");
-    const item = json.properties.problems.items.properties;
-    expect(Object.keys(item)).toEqual(
+    return Object.keys(json.properties.problems.items.properties);
+  };
+
+  it("describe the batch shape the generator expects", () => {
+    expect(itemProps("mcq")).toEqual(
       expect.arrayContaining(["format", "choices", "correct_choice_id", "explanation_steps"])
+    );
+  });
+
+  // The model is only ever sent one format's flat schema, so each new format
+  // needs its own answer fields present or the authored problem is unusable.
+  it("carries the select-all fields", () => {
+    expect(itemProps("multi_select")).toEqual(
+      expect.arrayContaining(["choices", "correct_choice_ids", "distractor_rationales"])
+    );
+  });
+
+  it("carries the ordering fields", () => {
+    expect(itemProps("ordering")).toEqual(
+      expect.arrayContaining(["items", "correct_order"])
+    );
+  });
+
+  it("gives the solver a way to answer every format", () => {
+    const json = jsonSchemaFor(SolverResultSchema) as { properties: Record<string, unknown> };
+    expect(Object.keys(json.properties)).toEqual(
+      expect.arrayContaining(["chosen_choice_id", "chosen_choice_ids", "chosen_order"])
     );
   });
 });

@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
-import { customAlphabet } from "nanoid";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase/service";
+import { newShareCode } from "@/lib/share-code";
 import {
   problemHashInput,
   splitProblem,
@@ -16,7 +16,6 @@ import { mapConcurrent, solveIndependently, solverAgrees, verifyProblem } from "
 import { AI_CONCURRENCY } from "@/lib/ai/provider";
 import { instantiate, templatesFor } from "@/lib/templates";
 
-const shareCode = customAlphabet("ABCDEFGHJKMNPQRSTUVWXYZ23456789", 8);
 
 export type SetConfig = {
   topicIds: string[];
@@ -25,6 +24,13 @@ export type SetConfig = {
   styles: ProblemStyle[];
   formats: ProblemFormat[];
   title?: string;
+  /**
+   * A set built against this student's own practice record. Derived server-side
+   * from their `attempts` and never accepted from a request body — `directives`
+   * lands verbatim in the authoring prompt, so the route may only ever take a
+   * plan id and rebuild this itself.
+   */
+  focus?: { label: string; directives: string[] };
 };
 
 export type BuildEvent =
@@ -35,6 +41,8 @@ export type BuildEvent =
 
 const POOL_FRACTION = 0.5;
 const MAX_COUNT = 15;
+/** Headroom under the route's 300s `maxDuration`, counted from the request. */
+export const BUILD_BUDGET_MS = 230_000;
 
 type NewProblemRow = {
   topic_id: string;
@@ -84,7 +92,14 @@ function rowFromGenerated(
 export async function* buildProblemSet(
   userId: string,
   isAnonymous: boolean,
-  config: SetConfig
+  config: SetConfig,
+  /**
+   * When the request that owns this build started. Anything the route does
+   * first — a coach read on the targeted path can burn 45s — is charged to the
+   * same invocation, so the budget has to be measured from there rather than
+   * from whenever this generator happens to be pulled.
+   */
+  requestStartedAt: number = Date.now()
 ): AsyncGenerator<BuildEvent> {
   const db = createServiceClient();
   const count = Math.min(Math.max(config.count, 1), MAX_COUNT);
@@ -92,10 +107,16 @@ export async function* buildProblemSet(
   // --- daily cap ---
   const since = new Date();
   since.setHours(0, 0, 0, 0);
+  // Only sets that actually cost a model call count. Review sets and copies of
+  // shared sets are assembled from problems that already exist, so counting
+  // them would let a student spend their whole generation allowance on sets
+  // that never used it. Both carry their own separate daily bound.
   const { count: todayCount } = await db
     .from("problem_sets")
     .select("id", { count: "exact", head: true })
     .eq("owner_id", userId)
+    .is("config->>review", null)
+    .is("config->>copiedFrom", null)
     .gte("created_at", since.toISOString());
   const cap = isAnonymous ? 5 : 20;
   if ((todayCount ?? 0) >= cap) {
@@ -147,7 +168,10 @@ export async function* buildProblemSet(
     .limit(500);
   const seenIds = new Set((recent ?? []).map((r) => r.problem_id as string));
 
-  const poolTarget = Math.floor(count * POOL_FRACTION);
+  // Pool problems are generic by construction — they were authored for whoever
+  // asked first. A set advertised as designed for you has to be written for you,
+  // so a targeted build skips reuse and pays the AI cost for every slot.
+  const poolTarget = config.focus ? 0 : Math.floor(count * POOL_FRACTION);
   if (poolTarget > 0) {
     const { data: pool } = await db
       .from("problems")
@@ -174,8 +198,24 @@ export async function* buildProblemSet(
     }
   }
 
+  // A targeted set aims at the problems this student got wrong, which is exactly
+  // where the author is most likely to land on something they have already seen.
+  // Their recent statements go in as negative examples.
+  let seenStatements: string[] = [];
+  if (config.focus && seenIds.size > 0) {
+    const { data: seenRows } = await db
+      .from("problems")
+      .select("content")
+      .in("id", [...seenIds].slice(0, 60));
+    seenStatements = (seenRows ?? [])
+      .map((r) => (r.content as { statement_latex?: string })?.statement_latex ?? "")
+      .filter(Boolean);
+  }
+
   // --- 2. templates ---
-  const templateSlots = count - chosen.length;
+  // Templates are deterministic drills; they can't be aimed at a misconception,
+  // so a targeted set skips them for the same reason it skips the pool.
+  const templateSlots = config.focus ? 0 : count - chosen.length;
   if (templateSlots > 0) {
     const eligible = topics.flatMap((t) =>
       templatesFor(t.slug, config.difficulty, config.styles, config.formats).map((e) => ({
@@ -215,7 +255,7 @@ export async function* buildProblemSet(
   // --- 3. AI generation + verification ---
   // Stop starting new AI rounds once we're close to the route's maxDuration:
   // a short set that arrives beats a full one the platform kills mid-flight.
-  const buildDeadline = Date.now() + 230_000;
+  const buildDeadline = requestStartedAt + BUILD_BUDGET_MS;
   let aiNeeded = count - chosen.length;
   let regenAttempted = false;
   while (aiNeeded > 0 && Date.now() < buildDeadline) {
@@ -233,7 +273,8 @@ export async function* buildProblemSet(
         difficulty: config.difficulty,
         styles: config.styles,
         formats: config.formats,
-        avoid: chosen.map((c) => c.statement).filter(Boolean),
+        avoid: [...chosen.map((c) => c.statement), ...seenStatements].filter(Boolean),
+        focus: config.focus?.directives,
       });
     } catch (err) {
       // Capacity failures are routine on a free tier. Anything already gathered
@@ -332,7 +373,7 @@ export async function* buildProblemSet(
     .insert({
       owner_id: userId,
       title,
-      share_code: shareCode(),
+      share_code: newShareCode(),
       config: { ...config, delivered: chosen.length },
     })
     .select("id")
@@ -371,46 +412,42 @@ async function insertProblems(
   }));
 }
 
-/** Load a set with sanitized problems (answers stripped) after verifying ownership. */
-export async function loadSetForUser(
-  setId: string,
-  userId: string
-): Promise<{
-  set: { id: string; title: string; share_code: string; config: SetConfig; created_at: string };
-  problems: SanitizedProblem[];
-} | null> {
-  const db = createServiceClient();
-  const { data: set } = await db
-    .from("problem_sets")
-    .select("id, title, share_code, config, created_at, owner_id")
-    .eq("id", setId)
-    .single();
-  if (!set || set.owner_id !== userId) return null;
+export type SetMeta = {
+  id: string;
+  title: string;
+  share_code: string;
+  config: SetConfig;
+  created_at: string;
+};
 
-  const { data: items } = await db
-    .from("problem_set_items")
-    .select("position, problems(id, style, format, difficulty, content, topics(title))")
-    .eq("set_id", setId)
-    .order("position");
+type ItemRow = {
+  position: number;
+  problems: {
+    id: string;
+    style: ProblemStyle;
+    format: ProblemFormat;
+    difficulty: number;
+    content: {
+      statement_latex: string;
+      hint: string | null;
+      choices?: { id: string; latex: string }[];
+      blanks_count?: number;
+      items?: { id: string; latex: string }[];
+    };
+    topics: { title: string } | null;
+  } | null;
+};
 
-  type ItemRow = {
-    position: number;
-    problems: {
-      id: string;
-      style: ProblemStyle;
-      format: ProblemFormat;
-      difficulty: number;
-      content: {
-        statement_latex: string;
-        hint: string | null;
-        choices?: { id: string; latex: string }[];
-        blanks_count?: number;
-      };
-      topics: { title: string } | null;
-    } | null;
-  };
-
-  const problems: SanitizedProblem[] = ((items ?? []) as unknown as ItemRow[])
+/**
+ * The one place a stored problem becomes something a client may see.
+ *
+ * It reads only from `content`; `answer` and `explanation` are never selected,
+ * so no caller can leak them by forgetting to strip a field. Shared by the
+ * owner's view and the share-link preview, which is why it takes rows rather
+ * than a set id — the entitlement question is the caller's to answer.
+ */
+export function sanitizeItems(items: unknown): SanitizedProblem[] {
+  return ((items ?? []) as unknown as ItemRow[])
     .filter((i) => i.problems)
     .map((i) => ({
       id: i.problems!.id,
@@ -422,8 +459,32 @@ export async function loadSetForUser(
       hint: i.problems!.content.hint,
       choices: i.problems!.content.choices,
       blanks_count: i.problems!.content.blanks_count,
+      items: i.problems!.content.items,
       topic_title: i.problems!.topics?.title,
     }));
+}
+
+export const ITEM_SELECT =
+  "position, problems(id, style, format, difficulty, content, topics(title))";
+
+/** Load a set with sanitized problems (answers stripped) after verifying ownership. */
+export async function loadSetForUser(
+  setId: string,
+  userId: string
+): Promise<{ set: SetMeta; problems: SanitizedProblem[] } | null> {
+  const db = createServiceClient();
+  const { data: set } = await db
+    .from("problem_sets")
+    .select("id, title, share_code, config, created_at, owner_id")
+    .eq("id", setId)
+    .single();
+  if (!set || set.owner_id !== userId) return null;
+
+  const { data: items } = await db
+    .from("problem_set_items")
+    .select(ITEM_SELECT)
+    .eq("set_id", setId)
+    .order("position");
 
   return {
     set: {
@@ -433,6 +494,6 @@ export async function loadSetForUser(
       config: set.config as SetConfig,
       created_at: set.created_at,
     },
-    problems,
+    problems: sanitizeItems(items),
   };
 }

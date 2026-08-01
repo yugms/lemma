@@ -4,13 +4,51 @@ import { derivativeRules } from "@/lib/templates/derivatives";
 import { linearEquations } from "@/lib/templates/linear-equations";
 import { linearSystems } from "@/lib/templates/linear-systems";
 import { quadraticSolving } from "@/lib/templates/quadratics";
+import {
+  fractionArithmetic,
+  integerOperations,
+  orderOfOperations,
+  percentChange,
+} from "@/lib/templates/arithmetic";
+import {
+  areaPerimeter,
+  distanceMidpoint,
+  exponentRules,
+  pythagorean,
+  slopeIntercept,
+} from "@/lib/templates/algebra-basics";
+import {
+  antiderivatives,
+  centerSpread,
+  simpleProbability,
+} from "@/lib/templates/stats-calc";
 import type { Template } from "@/lib/templates/types";
 
+/**
+ * Registration is the only wiring a template needs — and it is also what
+ * enrols it in the structural test that runs every declared difficulty and
+ * format across 25 seeds.
+ */
 export const templates: Template[] = [
   quadraticSolving,
   linearSystems,
   derivativeRules,
   linearEquations,
+  // Foundations
+  integerOperations,
+  orderOfOperations,
+  fractionArithmetic,
+  percentChange,
+  // Algebra 1 and geometry
+  exponentRules,
+  slopeIntercept,
+  pythagorean,
+  areaPerimeter,
+  distanceMidpoint,
+  // Statistics and calculus
+  centerSpread,
+  simpleProbability,
+  antiderivatives,
 ];
 
 export type TemplateInstance = {

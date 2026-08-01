@@ -1,65 +1,114 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+import { Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth-server";
+import { loadProgressForSets } from "@/lib/progress";
+import { formatRelativeDate } from "@/lib/format";
+import { SetRow, type SetRowData } from "@/components/sets/set-row";
 
 export const dynamic = "force-dynamic";
 
-export default async function SetsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+export const metadata: Metadata = { title: "My sets" };
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Kept out of the component body — reading the clock during render isn't pure. */
+function groupByRecency(sets: SetRowData[]) {
+  const cutoff = Date.now() - WEEK_MS;
+  const recent: SetRowData[] = [];
+  const earlier: SetRowData[] = [];
+  for (const s of sets) {
+    (new Date(s.createdAt).getTime() >= cutoff ? recent : earlier).push(s);
+  }
+  return [
+    { label: "This week", items: recent },
+    { label: "Earlier", items: earlier },
+  ].filter((g) => g.items.length > 0);
+}
+
+export default async function SetsPage() {
+  const [supabase, user] = await Promise.all([createClient(), getCurrentUser()]);
+
+  // The item count comes from the join rather than config, so a set that was
+  // delivered short reports what it actually holds.
   const { data: sets } = user
     ? await supabase
         .from("problem_sets")
-        .select("id, title, created_at, config")
+        .select("id, title, created_at, config, problem_set_items(count)")
         .order("created_at", { ascending: false })
         .limit(50)
     : { data: null };
 
+  const rows = (sets ?? []) as unknown as {
+    id: string;
+    title: string;
+    created_at: string;
+    config: { count?: number; difficulty?: number; delivered?: number };
+    problem_set_items: { count: number }[];
+  }[];
+
+  const progress = user
+    ? await loadProgressForSets(
+        rows.map((r) => r.id),
+        user.id
+      )
+    : new Map();
+
+  const data: SetRowData[] = rows.map((r) => {
+    const tally = progress.get(r.id);
+    return {
+      id: r.id,
+      title: r.title,
+      createdAt: r.created_at,
+      createdLabel: formatRelativeDate(r.created_at),
+      total:
+        r.problem_set_items?.[0]?.count ?? r.config.delivered ?? r.config.count ?? 0,
+      difficulty: r.config.difficulty ?? 1,
+      attempted: tally?.attempted ?? 0,
+      correct: tally?.correct ?? 0,
+    };
+  });
+
+  const groups = groupByRecency(data);
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">My sets</h1>
-        <Link
-          href="/build"
-          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
-        >
+    <div className="mx-auto max-w-3xl">
+      <header className="flex flex-wrap items-end justify-between gap-6 pb-10">
+        <div>
+          <p className="eyebrow eyebrow-accent">Library</p>
+          <h1 className="display mt-5 text-title">My sets</h1>
+        </div>
+        <Link href="/build" transitionTypes={["nav-forward"]} className="btn btn-accent">
+          <Plus className="h-3.5 w-3.5" aria-hidden />
           New set
         </Link>
-      </div>
+      </header>
 
-      {!sets || sets.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-zinc-300 bg-white py-16 text-center">
-          <p className="text-zinc-500">No problem sets yet.</p>
-          <p className="mt-1 text-sm text-zinc-400">
+      {data.length === 0 ? (
+        <div className="panel flex flex-col items-center px-6 py-20 text-center">
+          <h2 className="display-md text-section">Nothing here yet</h2>
+          <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted">
             Build your first set and it will show up here.
-            {!user && " (Guest history appears after your first set.)"}
+            {!user && " Guest history appears after your first set."}
           </p>
+          <Link href="/build" transitionTypes={["nav-forward"]} className="btn btn-accent mt-8">
+            Build a set
+          </Link>
         </div>
       ) : (
-        <ul className="space-y-3">
-          {sets.map((s) => {
-            const cfg = s.config as { count?: number; difficulty?: number; delivered?: number };
-            return (
-              <li key={s.id}>
-                <Link
-                  href={`/set/${s.id}`}
-                  className="flex items-center justify-between rounded-xl border border-zinc-200 bg-white p-4 transition hover:border-indigo-300 hover:shadow-sm"
-                >
-                  <div>
-                    <p className="font-medium text-zinc-800">{s.title}</p>
-                    <p className="text-xs text-zinc-400">
-                      {cfg.delivered ?? cfg.count} problems · difficulty {cfg.difficulty} ·{" "}
-                      {new Date(s.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <span className="text-zinc-300">→</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="space-y-12">
+          {groups.map((group) => (
+            <section key={group.label}>
+              <h2 className="eyebrow border-b border-line pb-3">{group.label}</h2>
+              <ul>
+                {group.items.map((s) => (
+                  <SetRow key={s.id} set={s} />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
       )}
     </div>
   );

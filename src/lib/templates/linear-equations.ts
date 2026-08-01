@@ -1,7 +1,13 @@
 import type { GeneratedProblem } from "@/lib/ai/schemas";
 import type { Rng } from "@/lib/rng";
 import type { Template } from "@/lib/templates/types";
-import { buildChoices, numericAnswer, signedTerm, term } from "@/lib/templates/helpers";
+import {
+  buildChoices,
+  buildOrdering,
+  numericAnswer,
+  signedTerm,
+  term,
+} from "@/lib/templates/helpers";
 
 /**
  * Multi-step linear equations with integer solutions.
@@ -12,7 +18,9 @@ import { buildChoices, numericAnswer, signedTerm, term } from "@/lib/templates/h
 export const linearEquations: Template = {
   id: "multi-step-linear",
   topicSlugs: ["multi-step-linear"],
-  formats: ["open", "mcq"],
+  // The worked steps are already in order, so an ordering problem is free —
+  // and solving-order is exactly what this topic is about.
+  formats: ["open", "mcq", "ordering"],
   difficulties: [1, 3],
   generate(rng: Rng, difficulty: number, format): GeneratedProblem {
     const x = rng.nonZeroInt(-9, 9);
@@ -31,7 +39,7 @@ export const linearEquations: Template = {
         { latex: `x = ${x}`, note: `${b > 0 ? "Subtract" : "Add"} ${Math.abs(b)} ${b > 0 ? "from" : "to"} both sides.` },
       ];
     } else if (difficulty === 2) {
-      let a = rng.nonZeroInt(2, 7);
+      const a = rng.nonZeroInt(2, 7);
       let c = rng.nonZeroInt(-5, 5);
       while (a === c) c = rng.nonZeroInt(-5, 5);
       const b = rng.nonZeroInt(-9, 9);
@@ -78,6 +86,15 @@ export const linearEquations: Template = {
         { latex: `${x * 2}`, misconception: "Multiplied instead of dividing in the final step." },
       ]);
       return { ...base, format: "mcq", ...mc };
+    }
+
+    if (format === "ordering") {
+      return {
+        ...base,
+        statement_latex: `Put the steps of this solution in the right order: \\[${statement.replace(/^Solve for \\\(x\\\): \\\[/, "").replace(/\\\]$/, "")}\\]`,
+        format: "ordering",
+        ...buildOrdering(rng, steps),
+      };
     }
 
     return { ...base, format: "open", answer: numericAnswer(x, `x = ${x}`) };

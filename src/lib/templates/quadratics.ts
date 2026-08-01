@@ -1,8 +1,9 @@
-import type { GeneratedProblem } from "@/lib/ai/schemas";
+import type { GeneratedProblem, ProblemFormat } from "@/lib/ai/schemas";
 import type { Rng } from "@/lib/rng";
 import type { Template } from "@/lib/templates/types";
 import {
   buildChoices,
+  buildOrdering,
   fractionLatex,
   multiValueAnswer,
   quadraticLatex,
@@ -20,7 +21,7 @@ import {
 export const quadraticSolving: Template = {
   id: "quadratic-solving",
   topicSlugs: ["quadratic-solving", "solving-quadratics-intro", "factoring-quadratics"],
-  formats: ["open", "mcq"],
+  formats: ["open", "mcq", "ordering"],
   difficulties: [1, 5],
   generate(rng: Rng, difficulty: number, format): GeneratedProblem {
     if (difficulty <= 3) return rationalRoots(rng, difficulty, format);
@@ -28,11 +29,11 @@ export const quadraticSolving: Template = {
   },
 };
 
-function rationalRoots(rng: Rng, difficulty: number, format: "mcq" | "open" | "fill_blank"): GeneratedProblem {
+function rationalRoots(rng: Rng, difficulty: number, format: ProblemFormat): GeneratedProblem {
   const a = difficulty <= 2 ? 1 : rng.pick([2, 3]);
   // roots p/a and q (keep one integer root when a > 1 for clean factoring)
   const range = difficulty === 1 ? 6 : 9;
-  let p = rng.nonZeroInt(-range, range);
+  const p = rng.nonZeroInt(-range, range);
   let q = rng.nonZeroInt(-range, range);
   if (difficulty >= 2 && p === q) q = -q; // prefer distinct roots at d2+
   // (a x - p)(x - q) = a x^2 - (aq + p) x + pq
@@ -89,6 +90,15 @@ function rationalRoots(rng: Rng, difficulty: number, format: "mcq" | "open" | "f
     return { ...base, format: "mcq", ...mc };
   }
 
+  if (format === "ordering") {
+    return {
+      ...base,
+      statement_latex: `These steps solve \\[${quadraticLatex(a, b, c)} = 0\\] Put them in the right order.`,
+      format: "ordering",
+      ...buildOrdering(rng, steps),
+    };
+  }
+
   return {
     ...base,
     format: "open",
@@ -96,7 +106,7 @@ function rationalRoots(rng: Rng, difficulty: number, format: "mcq" | "open" | "f
   };
 }
 
-function irrationalRoots(rng: Rng, difficulty: number, format: "mcq" | "open" | "fill_blank"): GeneratedProblem {
+function irrationalRoots(rng: Rng, difficulty: number, format: ProblemFormat): GeneratedProblem {
   // x^2 + bx + c with positive non-square discriminant
   let b = 0;
   let c = 0;
@@ -174,6 +184,15 @@ function irrationalRoots(rng: Rng, difficulty: number, format: "mcq" | "open" | 
       },
     ]);
     return { ...base, format: "mcq", ...mc };
+  }
+
+  if (format === "ordering") {
+    return {
+      ...base,
+      statement_latex: `These steps solve the equation using the quadratic formula. Put them in the right order.`,
+      format: "ordering",
+      ...buildOrdering(rng, steps),
+    };
   }
 
   return {

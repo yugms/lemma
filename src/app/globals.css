@@ -1,26 +1,850 @@
 @import "tailwindcss";
 
+/* ── lemma design system ──────────────────────────────────────────────
+   Oxblood on cream. The canvas is warm paper stock; the ink is nearly
+   black; one deep oxblood carries every navigational and brand signal.
+
+   Colour discipline — the two reds are the whole risk of this palette,
+   so they are separated three ways: by lightness (accent L*≈22 vs
+   incorrect L*≈45), by hue (crimson-purple vs orange-red), and by
+   containment. Accent never appears inside a graded answer region, and
+   correct/incorrect are never signalled by colour alone — always a mark
+   and a word too.
+   ─────────────────────────────────────────────────────────────────── */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+
+  --paper: #faf7f0;
+  --surface: #fffdf8;
+  --raised: #ffffff;
+  --sunk: #f2ede2;
+
+  --fg: #17130f;
+  --fg-muted: #5c5449;
+  --fg-faint: #6f675a;
+  /* Decorative only — below text contrast on purpose. Never set on text. */
+  --fg-ghost: #a79e8e;
+
+  --line: #e6dfd0;
+  --line-strong: #d3c9b4;
+
+  --solid: #17130f;
+  --on-solid: #faf7f0;
+
+  --accent: #7a1f2b;
+  --accent-hover: #94263a;
+  --accent-solid: #7a1f2b;
+  --accent-on: #fdf6f2;
+  --accent-line: #dcc0bd;
+  --accent-wash: #f7eeea;
+
+  --ok: #1f6b3a;
+  --ok-line: #b9d6c1;
+  --ok-wash: #f0f6f0;
+
+  --bad: #be3a22;
+  --bad-line: #eec7ba;
+  --bad-wash: #fcf1eb;
+
+  --shadow-color: 28 20 10;
+  --grain-opacity: 0.042;
+  --sheen: 255 255 255;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* System preference, unless the reader has explicitly chosen light. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --paper: #0e0c0a;
+    --surface: #17140f;
+    --raised: #1e1a14;
+    --sunk: #100e0b;
+
+    --fg: #f4f0e6;
+    --fg-muted: #a69c8a;
+    --fg-faint: #8a806f;
+    --fg-ghost: #5d5648;
+
+    --line: #2a251d;
+    --line-strong: #40382c;
+
+    --solid: #f4f0e6;
+    --on-solid: #0e0c0a;
+
+    --accent: #e4808c;
+    --accent-hover: #f09aa4;
+    --accent-solid: #a32a3c;
+    --accent-on: #fff2f1;
+    --accent-line: #5c2730;
+    --accent-wash: #21100f;
+
+    --ok: #7bcf9b;
+    --ok-line: #2b4c37;
+    --ok-wash: #101a13;
+
+    --bad: #ff9a85;
+    --bad-line: #5c2b1f;
+    --bad-wash: #211110;
+
+    --shadow-color: 0 0 0;
+    --grain-opacity: 0.03;
+    --sheen: 255 240 220;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Explicit choice always wins over the system preference. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #0e0c0a;
+  --surface: #17140f;
+  --raised: #1e1a14;
+  --sunk: #100e0b;
+
+  --fg: #f4f0e6;
+  --fg-muted: #a69c8a;
+  --fg-faint: #8a806f;
+  --fg-ghost: #5d5648;
+
+  --line: #2a251d;
+  --line-strong: #40382c;
+
+  --solid: #f4f0e6;
+  --on-solid: #0e0c0a;
+
+  --accent: #e4808c;
+  --accent-hover: #f09aa4;
+  --accent-solid: #a32a3c;
+  --accent-on: #fff2f1;
+  --accent-line: #5c2730;
+  --accent-wash: #21100f;
+
+  --ok: #7bcf9b;
+  --ok-line: #2b4c37;
+  --ok-wash: #101a13;
+
+  --bad: #ff9a85;
+  --bad-line: #5c2b1f;
+  --bad-wash: #211110;
+
+  --shadow-color: 0 0 0;
+  --grain-opacity: 0.03;
+  --sheen: 255 240 220;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-sunk: var(--sunk);
+
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-faint: var(--fg-faint);
+  --color-ghost: var(--fg-ghost);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-solid: var(--solid);
+  --color-on-solid: var(--on-solid);
+
+  --color-accent: var(--accent);
+  --color-accent-solid: var(--accent-solid);
+  --color-accent-on: var(--accent-on);
+  --color-accent-line: var(--accent-line);
+  --color-accent-wash: var(--accent-wash);
+
+  --color-ok: var(--ok);
+  --color-ok-line: var(--ok-line);
+  --color-ok-wash: var(--ok-wash);
+
+  --color-bad: var(--bad);
+  --color-bad-line: var(--bad-line);
+  --color-bad-wash: var(--bad-wash);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
+
+  /* Fluid display scale. Hero is set at true display optical size; the
+     smaller steps step the opsz axis down so the serifs stay sturdy. */
+  --text-hero: clamp(3rem, 1rem + 8.4vw, 6.75rem);
+  --text-hero--line-height: 0.9;
+  --text-hero--letter-spacing: -0.032em;
+
+  --text-title: clamp(2.125rem, 1.35rem + 3.2vw, 3.5rem);
+  --text-title--line-height: 0.98;
+  --text-title--letter-spacing: -0.024em;
+
+  --text-section: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
+  --text-section--line-height: 1.08;
+  --text-section--letter-spacing: -0.018em;
+
+  --text-prose: 1.0625rem;
+  --text-prose--line-height: 1.75;
+
+  --ease-spring: linear(
+    0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%, 0.849 31.5%,
+    0.937 38.1%, 0.968 41.8%, 0.991 45.7%, 1.006 50.1%, 1.015 55%, 1.017 63.9%,
+    1.001
+  );
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+}
+
+@layer base {
+  /* Tailwind v4 defaults borders to currentColor; hairlines are the
+     structural device here, so make the bare `border` utility correct. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--fg);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Paper grain. One 220px tile repeated on a fixed layer, so the whole
+     page shares a single rasterised texture instead of one per surface. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 220px 220px;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-on);
+  }
+
+  /* Double ring: the accent stroke reads on paper, the paper gap keeps it
+     legible when focus lands on an accent-filled control. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* KaTeX inherits colour, so dark mode needs no override. It does run
+     small next to 15–17px prose. */
+  .katex {
+    font-size: 1.05em;
+  }
+  .katex-display {
+    margin: 0.9rem 0;
+  }
+
+  input,
+  button,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+@layer components {
+  /* ── Type ─────────────────────────────────────────────────────── */
+
+  /* Display face at three optical sizes. High contrast and tight apertures
+     at hero scale; sturdier serifs and looser fit as the size drops — which
+     is exactly what the opsz axis is for. */
+  .display {
+    font-family: var(--font-display);
+    font-variation-settings: "opsz" 144;
+    font-weight: 400;
+  }
+  .display-md {
+    font-family: var(--font-display);
+    font-variation-settings: "opsz" 48;
+    font-weight: 400;
+  }
+  .display-sm {
+    font-family: var(--font-display);
+    font-variation-settings: "opsz" 20;
+    font-weight: 500;
+  }
+
+  /* Small caps section marker — the workhorse label of the whole UI. */
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+  .eyebrow-accent {
+    color: var(--accent);
+  }
+
+  .mono-meta {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Surfaces ─────────────────────────────────────────────────── */
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  /* Elevation is a warm ambient wash, not a grey drop shadow — grey
+     shadows on cream stock read as dirt. */
+  .panel-raised {
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    box-shadow:
+      0 1px 2px rgb(var(--shadow-color) / 0.04),
+      0 8px 24px -12px rgb(var(--shadow-color) / 0.1);
+  }
+
+  /* Hairline that fades at both ends — softer than a full-bleed rule. */
+  .rule-fade {
+    height: 1px;
+    border: 0;
+    background: linear-gradient(
+      to right,
+      transparent,
+      var(--line) 8%,
+      var(--line) 92%,
+      transparent
+    );
+  }
+
+  /* ── Buttons ──────────────────────────────────────────────────── */
+
+  .btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.5rem;
+    padding: 0 1.15rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 0.18s ease,
+      border-color 0.18s ease,
+      color 0.18s ease,
+      opacity 0.18s ease,
+      transform 0.18s var(--ease-out-quint),
+      box-shadow 0.18s ease;
+  }
+  .btn:not(:disabled):active {
+    transform: translateY(0.5px) scale(0.988);
+  }
+  .btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+
+  /* Primary. The border is load-bearing in dark mode, where the oxblood
+     fill sits under 3:1 against the paper on its own. */
+  .btn-accent {
+    background: var(--accent-solid);
+    border-color: color-mix(in oklab, var(--accent-solid) 55%, var(--fg));
+    color: var(--accent-on);
+    box-shadow: inset 0 1px 0 rgb(var(--sheen) / 0.12);
+  }
+  .btn-accent:not(:disabled):hover {
+    background: color-mix(in oklab, var(--accent-solid) 88%, var(--fg));
+    box-shadow:
+      inset 0 1px 0 rgb(var(--sheen) / 0.16),
+      0 4px 14px -6px color-mix(in oklab, var(--accent-solid) 60%, transparent);
+  }
+
+  .btn-solid {
+    background: var(--solid);
+    color: var(--on-solid);
+  }
+  .btn-solid:not(:disabled):hover {
+    background: color-mix(in oklab, var(--solid) 84%, var(--paper));
+  }
+
+  .btn-outline {
+    background: var(--surface);
+    border-color: var(--line-strong);
+    color: var(--fg);
+  }
+  .btn-outline:not(:disabled):hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .btn-ghost {
+    color: var(--fg-muted);
+    padding: 0 0.5rem;
+  }
+  .btn-ghost:not(:disabled):hover {
+    color: var(--fg);
+    background: var(--sunk);
+  }
+
+  .btn-lg {
+    height: 3rem;
+    padding: 0 1.6rem;
+    font-size: 0.9375rem;
+  }
+  .btn-sm {
+    height: 2rem;
+    padding: 0 0.75rem;
+    font-size: 0.8125rem;
+  }
+  .btn-icon {
+    height: 2.25rem;
+    width: 2.25rem;
+    padding: 0;
+  }
+
+  /* ── Inline link ──────────────────────────────────────────────── */
+
+  /* Underline grows from the left rather than switching on, so hover
+     reads as a gesture instead of a state flip. */
+  .link {
+    color: var(--accent);
+    background-image: linear-gradient(currentColor, currentColor);
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 0% 1px;
+    transition: background-size 0.28s var(--ease-out-expo);
+    padding-bottom: 1px;
+  }
+  .link:hover {
+    background-size: 100% 1px;
+  }
+
+  /* ── Controls ─────────────────────────────────────────────────── */
+
+  /* Toggle. State lives on aria-pressed so the styling and the
+     accessibility tree can't drift apart. A chip that is a link rather than a
+     button carries aria-current instead — aria-pressed is button-only — so both
+     attributes drive the same selected style. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--fg-muted);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.35;
+    cursor: pointer;
+    transition:
+      background-color 0.18s ease,
+      border-color 0.18s ease,
+      color 0.18s ease,
+      transform 0.18s var(--ease-out-quint);
+  }
+  .chip:not(:disabled):hover {
+    border-color: var(--accent-line);
+    color: var(--fg);
+  }
+  .chip:not(:disabled):active {
+    transform: scale(0.97);
+  }
+  .chip[aria-pressed="true"],
+  .chip[aria-current="page"] {
+    background: var(--accent-solid);
+    border-color: color-mix(in oklab, var(--accent-solid) 55%, var(--fg));
+    color: var(--accent-on);
+  }
+  .chip:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  .field {
+    width: 100%;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--fg);
+    font-size: 0.9375rem;
+    transition:
+      border-color 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+  .field::placeholder {
+    color: var(--fg-ghost);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 14%, transparent);
+  }
+  .field:disabled {
+    background: var(--sunk);
+    color: var(--fg-muted);
+  }
+
+  /* ── Annotations ──────────────────────────────────────────────── */
+
+  /* Aside rule — used for hints, diagnoses and errors instead of
+     tinted callout boxes. */
+  .aside-rule {
+    border-left: 2px solid var(--line-strong);
+    padding-left: 1rem;
+  }
+  .aside-rule-accent {
+    border-left-color: var(--accent);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    background: var(--sunk);
+    color: var(--fg-muted);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .badge-ok {
+    border-color: var(--ok-line);
+    background: var(--ok-wash);
+    color: var(--ok);
+  }
+  .badge-bad {
+    border-color: var(--bad-line);
+    background: var(--bad-wash);
+    color: var(--bad);
+  }
+  .badge-accent {
+    border-color: var(--accent-line);
+    background: var(--accent-wash);
+    color: var(--accent);
+  }
+
+  /* ── Progress ─────────────────────────────────────────────────── */
+
+  .meter {
+    position: relative;
+    height: 3px;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--line);
+  }
+  .meter-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--accent);
+    transition: width 0.7s var(--ease-out-expo);
+  }
+  /* Live builds get a travelling highlight so a stalled number still
+     looks like work in progress. */
+  .meter-live .meter-fill::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--sheen) / 0.55),
+      transparent
+    );
+    animation: sweep 1.6s linear infinite;
+  }
+
+  /* ── Skeletons ────────────────────────────────────────────────── */
+
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-xs);
+    background: var(--sunk);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--fg) 6%, transparent),
+      transparent
+    );
+    animation: sweep 1.5s ease-in-out infinite;
+  }
+}
+
+@layer utilities {
+  /* Content sits above the fixed grain layer. */
+  .above-grain {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Scroll-driven reveal. No JS, no observer — the browser drives it
+     from the element's own position in the viewport. */
+  .reveal {
+    animation: reveal-in linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 22%;
+  }
+
+  .lift {
+    transition:
+      transform 0.28s var(--ease-out-quint),
+      box-shadow 0.28s var(--ease-out-quint),
+      border-color 0.18s ease;
+  }
+  .lift:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-line);
+    box-shadow:
+      0 1px 2px rgb(var(--shadow-color) / 0.05),
+      0 12px 28px -14px rgb(var(--shadow-color) / 0.16);
+  }
+
+  /* Enter animation for content that mounts after an interaction. */
+  .enter-rise {
+    animation: rise-in 0.42s var(--ease-out-expo) both;
+  }
+  .enter-fade {
+    animation: fade-in 0.3s ease-out both;
+  }
+
+  .stamp {
+    animation: stamp-in 0.44s var(--ease-spring) both;
+  }
+
+  /* The header gains an ambient lift once the page is scrolled. Height is
+     deliberately untouched — a shrinking sticky header pulls the content
+     below it upward mid-scroll. */
+  @supports (animation-timeline: scroll()) {
+    .site-header {
+      animation: header-lift linear both;
+      animation-timeline: scroll();
+      animation-range: 0 90px;
+    }
+  }
+}
+
+@keyframes header-lift {
+  to {
+    background-color: color-mix(in oklab, var(--paper) 92%, transparent);
+    box-shadow: 0 12px 28px -22px rgb(var(--shadow-color) / 0.5);
+  }
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes stamp-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* ── View transitions ───────────────────────────────────────────────
+   Direction encodes navigation history: forward slides left, back
+   slides right. The header is pinned so the reader keeps one fixed
+   spatial anchor while the content moves.
+   ─────────────────────────────────────────────────────────────────── */
+
+::view-transition-old(.nav-forward) {
+  --slide: -48px;
+  animation:
+    140ms ease-in both vt-fade reverse,
+    360ms var(--ease-out-quint) both vt-slide reverse;
+}
+::view-transition-new(.nav-forward) {
+  --slide: 48px;
+  animation:
+    220ms ease-out 120ms both vt-fade,
+    360ms var(--ease-out-quint) both vt-slide;
+}
+::view-transition-old(.nav-back) {
+  --slide: 48px;
+  animation:
+    140ms ease-in both vt-fade reverse,
+    360ms var(--ease-out-quint) both vt-slide reverse;
+}
+::view-transition-new(.nav-back) {
+  --slide: -48px;
+  animation:
+    220ms ease-out 120ms both vt-fade,
+    360ms var(--ease-out-quint) both vt-slide;
+}
+
+/* Lateral moves — header nav, footer links. Same depth, so no slide. */
+::view-transition-old(.nav-lateral) {
+  animation: 120ms ease-in both vt-fade reverse;
+}
+::view-transition-new(.nav-lateral) {
+  animation: 200ms ease-out 100ms both vt-fade;
+}
+
+::view-transition-group(site-header) {
+  animation: none;
+  z-index: 100;
+}
+::view-transition-old(site-header) {
+  display: none;
+}
+::view-transition-new(site-header) {
+  animation: none;
+}
+
+@keyframes vt-fade {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+@keyframes vt-slide {
+  from {
+    translate: var(--slide);
+  }
+  to {
+    translate: 0;
+  }
+}
+
+/* Theme change: a circular wipe from the toggle, driven by coordinates
+   the button writes onto :root before starting the transition. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+[data-theme-switching]::view-transition-new(root) {
+  animation: theme-wipe 0.5s var(--ease-out-expo);
+  clip-path: circle(140% at var(--theme-x, 50%) var(--theme-y, 0%));
+  z-index: 1;
+}
+[data-theme-switching]::view-transition-old(root) {
+  z-index: 0;
+}
+
+@keyframes theme-wipe {
+  from {
+    clip-path: circle(0% at var(--theme-x, 50%) var(--theme-y, 0%));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal {
+    animation: none;
+    opacity: 1;
+  }
+  .lift:hover {
+    transform: none;
+  }
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+  }
 }

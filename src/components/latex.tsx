@@ -1,64 +1,36 @@
-import katex from "katex";
 import "katex/dist/katex.min.css";
 
-/** Render a raw LaTeX string (no delimiters) as math. */
-export function Latex({ math, display = false, className }: { math: string; display?: boolean; className?: string }) {
-  let html: string;
-  try {
-    html = katex.renderToString(math, {
-      throwOnError: false,
-      displayMode: display,
-      strict: "ignore",
-    });
-  } catch {
-    html = math;
-  }
+/**
+ * Client-safe math display. These components take markup that
+ * `src/lib/math-render.ts` produced on the server and inject it — they
+ * deliberately do not import KaTeX, so no route pays 275 kB of JavaScript
+ * to show an equation. Only the stylesheet crosses over.
+ */
+
+/** A single rendered expression, from `renderMath()`. */
+export function Math({ html, className }: { html: string; className?: string }) {
   return <span className={className} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 /**
- * Render prose containing inline \( \) and display \[ \] math segments,
- * plus {{n}} placeholders rendered as small blank markers.
+ * Rendered prose, from `renderProse()`.
  *
- * `as="span"` is required when the output sits inside a <p> or other phrasing
- * context — a <div> there is invalid HTML and trips a React hydration error.
+ * `as="span"` is required when the output sits inside a <p> or other
+ * phrasing context — a <div> there is invalid HTML and trips a React
+ * hydration error.
  */
-export function MathProse({
-  text,
+export function Prose({
+  html,
   className,
+  id,
   as: Wrapper = "div",
 }: {
-  text: string;
+  html: string;
   className?: string;
+  id?: string;
   as?: "div" | "span";
 }) {
-  const parts: React.ReactNode[] = [];
-  const regex = /\\\((.+?)\\\)|\\\[([\s\S]+?)\\\]|\{\{(\d+)\}\}/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let key = 0;
-  while ((m = regex.exec(text)) !== null) {
-    if (m.index > last) parts.push(<span key={key++}>{text.slice(last, m.index)}</span>);
-    if (m[1] !== undefined) {
-      parts.push(<Latex key={key++} math={m[1]} />);
-    } else if (m[2] !== undefined) {
-      parts.push(
-        <span key={key++} className="block my-2 text-center">
-          <Latex math={m[2]} display />
-        </span>
-      );
-    } else {
-      parts.push(
-        <span
-          key={key++}
-          className="inline-flex items-center justify-center min-w-14 mx-1 px-2 border-b-2 border-dashed border-indigo-400 text-indigo-500 text-sm font-medium"
-        >
-          {m[3]}
-        </span>
-      );
-    }
-    last = regex.lastIndex;
-  }
-  if (last < text.length) parts.push(<span key={key++}>{text.slice(last)}</span>);
-  return <Wrapper className={className}>{parts}</Wrapper>;
+  return (
+    <Wrapper id={id} className={className} dangerouslySetInnerHTML={{ __html: html }} />
+  );
 }

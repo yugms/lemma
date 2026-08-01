@@ -1,7 +1,13 @@
 import type { GeneratedProblem } from "@/lib/ai/schemas";
 import type { Rng } from "@/lib/rng";
 import type { Template } from "@/lib/templates/types";
-import { buildChoices, expressionAnswer, signedTerm, term } from "@/lib/templates/helpers";
+import {
+  buildChoices,
+  buildOrdering,
+  expressionAnswer,
+  signedTerm,
+  term,
+} from "@/lib/templates/helpers";
 
 /**
  * 2x2 linear systems with integer solutions.
@@ -11,7 +17,9 @@ import { buildChoices, expressionAnswer, signedTerm, term } from "@/lib/template
 export const linearSystems: Template = {
   id: "linear-systems-2x2",
   topicSlugs: ["systems-2x2"],
-  formats: ["open", "mcq"],
+  // Elimination is a sequence of moves, so ordering the steps is a real test of
+  // whether the method is understood rather than memorised.
+  formats: ["open", "mcq", "ordering"],
   difficulties: [1, 3],
   generate(rng: Rng, difficulty: number, format): GeneratedProblem {
     const x = rng.nonZeroInt(-6, 6);
@@ -81,6 +89,15 @@ export const linearSystems: Template = {
         { latex: `(${x + (b1 !== 0 ? Math.sign(b1) : 1)}, ${y - 1})`, misconception: "Arithmetic slip when back-substituting." },
       ]);
       return { ...base, format: "mcq", ...mc };
+    }
+
+    if (format === "ordering") {
+      return {
+        ...base,
+        statement_latex: `These steps solve the system \\[\\begin{cases}${eq1}\\\\ ${eq2}\\end{cases}\\] Put them in the right order.`,
+        format: "ordering",
+        ...buildOrdering(rng, steps),
+      };
     }
 
     return {
