@@ -1,99 +1,219 @@
-# lemma
+<div align="center">
+  <img src="src/app/icon.svg" alt="" width="76" height="76">
 
-Math practice, generated for you. Build custom problem sets by course → unit → topic with chosen difficulty, problem style (drill, word, conceptual, proof, error analysis), and question format (multiple choice, open answer, fill-in-the-blank). Every AI-generated problem is independently re-solved and verified before it reaches you; every problem carries a step-by-step solution, and wrong answers get an AI diagnosis of what likely went wrong.
+  <h1>lemma</h1>
 
-## Stack
+  <p><strong>Math practice, generated for you.</strong></p>
 
-- **Next.js 16** (App Router, TypeScript) on Vercel
-- **Supabase** — Postgres (catalog, verified problem pool, sets, attempts), Auth (anonymous guests + Google), Storage (worksheet scans, phase 3)
-- **Google Gemini (free tier)** — a Flash model writes problems (JSON-schema structured outputs), a Flash-Lite model verifies each one by solving it independently, checks answer equivalence, and writes misconception feedback. Each role takes a preference-ordered chain of model ids (`GEMINI_GENERATOR_MODELS` / `GEMINI_CHECKER_MODELS`, see below), and all model access is funnelled through `src/lib/ai/provider.ts` so swapping providers is one file.
-- **KaTeX** for math rendering — run entirely on the server, so the browser receives HTML and never downloads the ~275 kB math engine
-- Deterministic **template engine** for instant drill problems
-- **Tailwind v4** (CSS-first, no config file) over a token-based design system in `src/app/globals.css`
+  <p>
+    Build a problem set by course → unit → topic, at the difficulty, style and format you choose.<br>
+    Every AI-written problem is re-solved by a second model before it reaches you, and every one
+    arrives with a worked solution.
+  </p>
 
-## How generation works
+  <p>
+    <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white">
+    <img alt="React 19" src="https://img.shields.io/badge/React-19-087ea4?logo=react&logoColor=white">
+    <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white">
+    <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Postgres-3ecf8e?logo=supabase&logoColor=white">
+    <img alt="Gemini" src="https://img.shields.io/badge/Gemini-free%20tier-8e75b2?logo=googlegemini&logoColor=white">
+  </p>
+</div>
 
-`POST /api/sets` fills a set in cost order, streaming SSE progress:
+---
 
-1. **Pool reuse** — verified problems already in the DB matching topic/style/format/difficulty (excluding ones you've seen recently)
-2. **Templates** — seeded-RNG parametrized generators with computed answers and authored explanations (free, instant)
-3. **AI generation** — batched call to the generator model (one call per format) → each problem is structurally validated (KaTeX renders, MCQ integrity), independently solved by the checker model, compared against the stored answer, repaired once on mismatch, or discarded
+Most practice apps hand you a fixed question bank. lemma writes the questions on demand — but generated math is only useful if it is *correct*, so the interesting part of this codebase is everything that happens between "the model wrote a problem" and "a student sees it": a free structural pass, an independent re-solve by a second model that never sees the answer, one repair attempt, and a discard if it still disagrees.
 
-## Practice, progress and review
+It runs on Google AI Studio's free tier, so the whole thing costs $0 to operate.
 
-Practice state is **derived from the `attempts` table**, not stored separately — there is no progress column and no extra table. Every graded submission and every reveal already writes an attempt row, and `is_correct` carries the whole state: `true`, `false`, or `null` for "gave up and read the solution". A problem with no row is unattempted.
+## Features
 
-That gives three behaviours for free:
+- **Sets built to order** — 9 courses, 47 units, 103 topics (Foundations through AP Calculus BC and competition math), 5 difficulty levels, 5 problem styles (drill, word, conceptual, proof, error analysis) and 5 formats (multiple choice, open answer, fill-in-the-blank, select-all, order-the-steps). Up to 15 problems a set.
+- **Verified, not just generated** — each problem is structurally validated, then solved from the statement alone by a checker model that never sees the stored answer. Disagreement earns one repair pass, then a discard.
+- **Three ways to work a set** — practice (graded, one retry, solutions on demand), quiz (nothing disclosed until you hand it in), and flashcards (unscored, infinitely repeatable).
+- **Grading that understands math** — `3/4`, `0.75` and `\frac{3}{4}` are the same answer. A local normalizer settles almost everything; only genuinely ambiguous cases cost a model call. Wrong answers get a diagnosis of the specific slip, not "incorrect".
+- **A practice record you can't fake** — every score, meter and stat is reconstructed from `attempts` rows written server-side. There is no progress column to forge.
+- **Review queue** — the problems you actually missed, ranked worst-first, rebuilt into a fresh set for free.
+- **Stats and prescriptions** — accuracy by topic, format, style and difficulty; recurring-mistake analysis; and one-click sets targeted at your weakest work, with the targeting config derived server-side from your own history.
+- **Study sessions and sharing** — scope stats to a single sitting, or hand a set to someone else with a share link (which grants a *copy*, never access to your record).
+- **Instant, free drills** — 16 deterministic templates with computed answers and authored explanations skip the model entirely.
+- **Guest-first** — anonymous sign-in by default; linking Google keeps the same user id, so nothing you've done is lost on upgrade.
 
-- **Resume.** Reload or come back tomorrow and the set opens on the first problem you haven't attempted, with everything you'd already done still marked.
-- **Review.** Move backwards, or jump to any problem from the progress ribbon. Revisiting a finished problem replays the answer you actually submitted along with its verdict and worked solution, via a `recall` action that reads history without writing a new attempt.
-- **Scores that can't be faked.** Outcomes are only ever written server-side by `/api/check`, so the library meters, the set-level summary and the dashboard stats all reconstruct from data the client can't author.
+## How it works
 
-## Interface
+`POST /api/sets` (`maxDuration = 300`) fills a set in cost order and streams progress as SSE:
 
-Both themes ship: the palette follows the OS by default, and a System / Light / Dark control in the header overrides it. Colour is load-bearing but never load-bearing *alone* — correct and incorrect states always pair the colour with an icon and a word, and all text meets WCAG AA contrast in both themes.
+```mermaid
+flowchart LR
+  R[Request] --> P["1 · Pool reuse<br/><i>free</i>"]
+  P --> T["2 · Templates<br/><i>free, instant</i>"]
+  T --> G["3 · AI authoring<br/><i>batched, per format</i>"]
+  G --> S{"Structural check<br/>KaTeX · MCQ · blanks"}
+  S -->|fail| X[Discard]
+  S -->|pass| V["Independent re-solve<br/><i>statement only</i>"]
+  V -->|agrees| OK[Set]
+  V -->|disagrees| RP[Repair once]
+  RP --> RS{Re-solve}
+  RS -->|agrees| OK
+  RS -->|no| X
+  P --> OK
+  T --> OK
+```
 
-Route changes animate directionally (forward slides left, back slides right) through React's `<ViewTransition>`, and reveals, the theme wipe and the build progress meter are all CSS. No animation library is used, and everything is disabled under `prefers-reduced-motion`.
+1. **Pool reuse** — already-verified problems matching your request, excluding anything you attempted in the last 30 days, least-served first. Capped at half the set.
+2. **Templates** — seeded-RNG parametrized generators. The answer is computed, not claimed, so they skip verification entirely.
+3. **AI generation** — one batched authoring call per format, then verification fanned out at a bounded concurrency.
 
-## Local setup
+Two budgets exist because a short set beats no set: a 230s build deadline stops *starting* new rounds inside the route's 300s limit, and capacity failures break out of the loop with whatever was already gathered rather than throwing.
 
-1. `npm install`
-2. Copy `.env.example` → `.env.local` and fill in:
-   - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — Supabase dashboard → Project Settings → API Keys
-   - `SUPABASE_SECRET_KEY` — same page, "Secret keys" → create one (server-only, bypasses RLS). These are the current API keys; the legacy `anon` / `service_role` JWTs are deprecated.
-   - `GEMINI_API_KEY` — free key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey), no card required
+> [!NOTE]
+> Every model call in the app goes through one function, `callStructured()` in `src/lib/ai/provider.ts`. It returns `null` for unusable output (callers must degrade) and throws only when the entire model chain is rate-limited. Swapping providers is a change to that one file.
 
-   Optional overrides (comma-separated, preference-ordered — later entries are tried only when earlier ones are rate-limited or overloaded):
+### Practice modes
 
-   | Variable | Default |
-   |---|---|
-   | `GEMINI_GENERATOR_MODELS` | `gemini-3.5-flash,gemini-3.6-flash,gemini-2.5-flash` |
-   | `GEMINI_CHECKER_MODELS` | `gemini-3.5-flash-lite,gemini-2.5-flash-lite,gemini-2.5-flash` |
-   | `GEMINI_CONCURRENCY` | `3` |
+Each mode is defined by three answers, which the grading route reads from one table (`src/lib/attempt-state.ts`):
 
-   `NEXT_PUBLIC_SITE_URL` is optional and defaults to `https://lemma.app`. It sets the metadata base for canonical/OG URLs and is the host written into `robots.txt` and `sitemap.xml`, so set it in production. Auth does **not** use it — sign-in derives its redirect from `window.location.origin`.
+| Mode | Counts toward the set | Reveals the answer | Second attempt |
+|---|---|---|---|
+| Practice | yes | yes | on a wrong answer |
+| Quiz | yes | only after hand-in | no |
+| Flashcards | no (unscoped reps) | yes | n/a — repeat freely |
 
-   > `.env.example` still lists the model variables in the singular (`GEMINI_GENERATOR_MODEL`). The table above is authoritative.
-3. In the Supabase dashboard: **Authentication → Sign In / Providers → enable "Anonymous sign-ins"** (required for guest mode). Optionally configure the Google provider (client ID/secret from Google Cloud Console) for sign-in.
-4. `npm run dev`
+## Getting started
 
-Database schema lives in the Supabase project's migration history (`catalog`, `problems`, `sets_attempts_uploads`, `rls_and_storage`, `seed_catalog`, `bump_times_served_fn`, `harden_rls_client_read_only`).
+### Prerequisites
+
+- Node.js 20+
+- A [Supabase](https://supabase.com) project (free tier)
+- A [Google AI Studio](https://aistudio.google.com/apikey) API key (free, no card)
+
+### Install
+
+```bash
+git clone <your-fork-url> lemma
+cd lemma
+npm install
+cp .env.example .env.local   # then fill it in — see below
+npm run dev
+```
+
+### Configure Supabase
+
+1. **Authentication → Sign In / Providers → enable "Anonymous sign-ins"**. This is required — guest mode is the default path through the app.
+2. Optionally configure the **Google** provider (client ID/secret from Google Cloud Console) to allow sign-in.
+
+> [!IMPORTANT]
+> There is no local database and no SQL in this repo. The schema lives in the Supabase project's migration history (`catalog`, `problems`, `sets_attempts_uploads`, `rls_and_storage`, `seed_catalog`, `bump_times_served_fn`, `lock_down_bump_times_served`, `harden_rls_client_read_only`, `study_sessions_and_coach_reads`, `add_problem_formats`, `attempt_retries`, `catalog_foundations_geometry_stats`). Inspect and change it through the Supabase MCP server configured in `.mcp.json`.
+
+### Environment variables
+
+| Variable | Required | Notes |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | yes | Project Settings → API |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes | Same page. The current key format — the legacy `anon` JWT is deprecated |
+| `SUPABASE_SECRET_KEY` | yes | "Secret keys" → create one. **Server-only, bypasses RLS** |
+| `GEMINI_API_KEY` | yes | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `NEXT_PUBLIC_SITE_URL` | no | Defaults to `https://lemma.app`. Sets the metadata base and the host in `robots.txt` / `sitemap.xml` — set it in production. Auth does **not** use it; sign-in derives its redirect from `window.location.origin` |
+| `GEMINI_GENERATOR_MODELS` | no | `gemini-3.5-flash,gemini-3.6-flash,gemini-2.5-flash` |
+| `GEMINI_CHECKER_MODELS` | no | `gemini-3.5-flash-lite,gemini-2.5-flash-lite,gemini-2.5-flash` |
+| `GEMINI_CONCURRENCY` | no | `3` — free-tier limits are around 10 RPM |
+
+The two model variables are comma-separated **preference-ordered chains**: later entries are tried only when earlier ones are rate-limited or overloaded, because free-tier Flash models return 503 in bursts.
+
+> [!TIP]
+> Only Flash and Flash-Lite tiers are free. Pointing these at a Pro model works, but stops being free.
+
+### Commands
+
+```bash
+npm run dev            # dev server
+npm run build          # production build
+npm start              # serve the production build
+npm run lint           # eslint (next/core-web-vitals + React Compiler rules)
+npm run test           # vitest — offline tests only
+npx tsc --noEmit       # typecheck (no npm script for this)
+```
+
+## Testing
+
+```bash
+npx vitest run src/lib/__tests__/core.test.ts   # one file
+npx vitest run -t "normalizeMath"               # one test by name
+```
+
+- **`core.test.ts`** — answer normalization and comparison, plus a structural validation of every template across 25 seeds × every declared difficulty and format.
+- **`formats.test.ts`** — the per-format round trip: author → split into DB columns → grade → render. Keyed off `PROBLEM_FORMATS`, so a new format without a fixture fails here rather than in production.
+- **`analytics.test.ts`** — streaks, smoothing and weakness ranking, run against a pure `aggregate()`.
+- **`provider-schema.test.ts`** — asserts no schema sent to a model contains `$ref` / `$defs` / `$schema`. Gemini only supports `$ref` in non-required properties, and a regression fails at request time with an opaque 400.
+- **`live-provider.test.ts`** — hits the real API and self-skips without a key:
+
+  ```bash
+  node --env-file=.env.local ./node_modules/vitest/vitest.mjs run src/lib/__tests__/live-provider.test.ts
+  ```
+
+## Project structure
+
+```
+src/
+├── app/                 # routes — every page is a Server Component
+│   ├── api/sets/        # SSE set builder (maxDuration 300)
+│   ├── api/check/       # the only path that ever returns an answer key
+│   ├── build/ sets/     # builder + library
+│   ├── set/[id]/        # practice · quiz · flashcards
+│   ├── review/ stats/   # missed-problem queue · analytics + prescriptions
+│   └── s/[code]/        # shared-set landing
+├── components/          # client components; practice engines, inputs, design bits
+├── lib/
+│   ├── ai/              # provider, schemas, generation, verification, grading, coach
+│   ├── templates/       # deterministic parametrized generators
+│   ├── supabase/        # three clients: browser · server (RLS) · service (bypasses RLS)
+│   ├── sets.ts          # the build pipeline
+│   ├── answers.ts       # normalizeMath and the local grading ladder
+│   ├── analytics.ts     # stats derived from attempts
+│   └── math-render.ts   # KaTeX, server-side only
+└── proxy.ts             # Next 16's renamed middleware — refreshes the Supabase session
+```
 
 ## Security model
 
-- `problems` has RLS enabled with **no policies** — deny-all. Answers and worked solutions are only ever read server-side with the secret key, and `loadSetForUser()` strips them into a `SanitizedProblem` before anything renders or responds.
-- `/api/check` is the only path that returns an answer key, and it first proves the problem belongs to a set the caller owns. Its `recall` action, which replays a past outcome, additionally requires that an attempt already exists — so it can't be used to read an answer early.
-- Browser sessions get read-only access to their own `problem_sets`, `problem_set_items`, and `attempts` (plus delete on their own sets). Grading outcomes are written exclusively by `/api/check`, so a client can't fabricate its own practice history — which is what makes the derived progress and stats trustworthy.
-- Deleting a set relies on the `delete own sets` policy as its authorization check rather than an application-level test. `problem_set_items` cascades; `attempts.set_id` is `ON DELETE SET NULL`, so practice history survives the set it was earned in.
-- The catalog (`courses` / `units` / `topics`) is public-read.
-- `worksheet-scans` is a private bucket with per-user folder policies.
-- Guests are Supabase anonymous users, so they carry the `authenticated` role and every owner-scoped policy applies to them unchanged. Signing in with Google uses `linkIdentity`, which keeps the same user id and therefore the same history.
+The `problems` table holds answer keys, so the design assumes the client is hostile.
+
+- **`problems` has RLS enabled with no policies** — deny-all. It is read server-side only, and `loadSetForUser()` strips every row into a `SanitizedProblem` before anything renders.
+- **`/api/check` is the only path that discloses an answer**, and it first proves the problem appears in a set the caller owns. Problems are pooled across users, so checking the set id alone would leak arbitrary answer keys. Its `recall` action (replaying an outcome you already earned) additionally requires that an attempt exists, so it can't read an answer early.
+- **A live retry offer and the answer key are mutually exclusive** — handing over the key beside a "Try again" button would turn the second attempt into a copying exercise.
+- **Outcomes are written exclusively server-side.** Clients get read-only access to their own sets, items and attempts. That is what makes the derived progress, meters and stats trustworthy.
+- **Targeted sets take a plan id and nothing else.** The topics, difficulty and above all the authoring *directives* are rebuilt server-side from the caller's own history, because `focus.directives` lands verbatim in a model prompt.
+- **A share link grants a copy, not access.** Opening one shows sanitized problems and offers to mint a set you own; widening the ownership check to "or you know the code" would have been the smaller diff and the much larger attack surface.
+- **Deleting a set relies on the `delete own sets` RLS policy** as the authorization check, so a forged id matches no rows. `problem_set_items` cascades; `attempts.set_id` is `ON DELETE SET NULL`, so practice history outlives the set it was earned in.
+- **Guests are Supabase anonymous users**, carrying the `authenticated` role, so every `auth.uid()`-scoped policy covers them unchanged. Google sign-in uses `linkIdentity()`, preserving the user id and therefore the history.
+
+Daily bounds: 5 generated sets for guests, 20 signed-in (only sets that cost a model call count), plus 10 review sets and 10 shared-set copies.
+
+> [!WARNING]
+> A guest's identity lives only in their session cookie. Clearing it orphans their sets permanently — to test the signed-out state, fetch with `credentials: "omit"` instead.
 
 ### Accepted advisor findings
 
 Two Supabase advisor items are expected here rather than bugs:
 
-- **`rls_enabled_no_policy` on `problems` (INFO)** — deliberate. No policy means deny-all, which is exactly what a table holding answer keys should be.
-- **`auth_allow_anonymous_sign_ins` (WARN) on `attempts`, `problem_sets`, `problem_set_items`, `worksheet_uploads`, `storage.objects`** — flagged because anonymous sign-ins are enabled, so `authenticated`-role policies also cover guests. That is the point: guest practice is a product requirement. Every one of these policies is still scoped to `auth.uid()`, so a guest reaches only their own rows.
+- **`rls_enabled_no_policy` on `problems` (INFO)** — deliberate. No policy means deny-all, which is what a table of answer keys should be.
+- **`auth_allow_anonymous_sign_ins` (WARN)** — flagged because anonymous sign-ins are on, so `authenticated`-role policies also cover guests. That is the product requirement; every one of those policies is still scoped to `auth.uid()`.
 
-Still open: **leaked-password protection** is off. It doesn't apply today (auth is anonymous + Google only, no passwords), but turn it on before adding email/password sign-in.
+Still open: leaked-password protection is off. It doesn't apply today (anonymous + Google only, no passwords), but turn it on before adding email/password sign-in.
 
-## Tests
+## Notes for contributors
 
-```bash
-npm run test        # vitest run — offline tests only
-npx tsc --noEmit    # typecheck
-npm run lint
-```
+A few invariants here are easy to break silently and none of them fail loudly:
 
-`core.test.ts` covers answer normalization/comparison and structurally validates every template across seeds, difficulties, and formats. `provider-schema.test.ts` asserts that no schema sent to a model contains `$ref`/`$defs`/`$schema`, which Gemini rejects with an opaque 400. `live-provider.test.ts` hits the real API and self-skips without `GEMINI_API_KEY`:
+- **KaTeX must never reach the browser.** `src/lib/math-render.ts` runs it in Node; `src/components/latex.tsx` only injects the resulting HTML. Importing `katex` from a Client Component adds ~275 kB.
+- **The Supabase browser SDK is lazily imported.** Auth is resolved server-side and passed down as a plain prop; `@/lib/auth` is `await import(...)`-ed at the point of a click. A top-level import puts ~64 kB gzipped back on every route.
+- **Failure paths degrade, they don't throw** — partial sets, discarded problems, `null` returns. Keep that when adding pipeline steps.
+- **Correctness is never colour alone.** Every ok/bad state pairs colour with an icon and a word, and the oxblood accent never appears inside a graded answer region.
+- **This is not the Next.js you know.** Read the relevant guide in `node_modules/next/dist/docs/` before writing route code; `params` are Promises and `middleware` is now `proxy.ts`.
 
-```bash
-node --env-file=.env.local ./node_modules/vitest/vitest.mjs run src/lib/__tests__/live-provider.test.ts
-```
+`CLAUDE.md` and `AGENTS.md` carry the longer version of all of this.
 
 ## Roadmap
 
-- **Phase 2:** printable worksheets + answer keys (QR/share codes), flashcard mode, timed quizzes, multi-part problems
-- **Phase 3:** scan your completed worksheet for AI grading, graph-based questions, matching format
-- **Phase 4:** problem quality loop, spaced review of missed problems. *(Progress and stats shipped: per-set completion, accuracy and activity on the home dashboard, and resume/review during practice — all derived from `attempts`.)*
+- **Phase 3** — scan a completed worksheet for AI grading, graph-based questions, matching format, multi-part problems, printable worksheets with answer keys
+- **Phase 4** — problem quality loop, spaced repetition on top of the review queue
