@@ -41,9 +41,3 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-.vercel
-.env*
-# Keep the negation last so it wins: the template documents required setup
-# and contains no secrets.
-!.env.example
