@@ -45,8 +45,20 @@ export function DangerZone({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
+  /**
+   * A count is only "nothing" when it is known to be zero.
+   *
+   * `null` means the lookup failed, and an unknown count must never disable a
+   * delete button — that would tell someone there is nothing to remove when
+   * there may well be. Unknown therefore reads as "possibly something".
+   */
+  const isEmpty = (n: number | null) => n === 0;
   const nothingToClear =
-    summary.attempts === 0 && summary.sessions === 0 && summary.scans === 0;
+    isEmpty(summary.attempts) && isEmpty(summary.sessions) && isEmpty(summary.scans);
+
+  /** "3 answers", or just "your answers" when the number is unknown. */
+  const countOf = (n: number | null, singular: string, plural = `${singular}s`) =>
+    n === null ? `your ${plural}` : `${n} ${n === 1 ? singular : plural}`;
 
   const actions: {
     id: ActionId;
@@ -64,14 +76,14 @@ export function DangerZone({
       title: "Clear practice history",
       body: "Wipes everything you've earned by working through your sets. The sets themselves stay, so you can practise them again from scratch.",
       removes: [
-        `${summary.attempts} answer${summary.attempts === 1 ? "" : "s"}`,
-        `${summary.sessions} study session${summary.sessions === 1 ? "" : "s"}`,
-        ...(summary.scans > 0
-          ? [`${summary.scans} scanned page${summary.scans === 1 ? "" : "s"}`]
+        countOf(summary.attempts, "answer"),
+        countOf(summary.sessions, "study session"),
+        ...(summary.scans === null || summary.scans > 0
+          ? [countOf(summary.scans, "scanned page")]
           : []),
         ...(summary.hasCoachRead ? ["your coach's read"] : []),
       ],
-      keeps: `${summary.sets} set${summary.sets === 1 ? "" : "s"}`,
+      keeps: countOf(summary.sets, "set"),
       phrase: "clear history",
       cta: "Clear history",
       disabled: nothingToClear,
@@ -82,14 +94,14 @@ export function DangerZone({
       title: "Delete all my data",
       body: "Your sets go too. Each one cost model calls and a slot against your daily limit, so this is worth more than it looks — you'd have to generate them all again.",
       removes: [
-        `${summary.sets} set${summary.sets === 1 ? "" : "s"}`,
-        `${summary.attempts} answer${summary.attempts === 1 ? "" : "s"}`,
+        countOf(summary.sets, "set"),
+        countOf(summary.attempts, "answer"),
         "everything else on this account",
       ],
       keeps: "your account, so you stay signed in",
       phrase: "delete my data",
       cta: "Delete everything",
-      disabled: summary.sets === 0 && nothingToClear,
+      disabled: isEmpty(summary.sets) && nothingToClear,
       run: deleteAllDataAction,
     },
     {

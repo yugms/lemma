@@ -16,11 +16,16 @@ import { SCAN_BUCKET } from "@/lib/worksheets";
  * cannot be found again afterwards.
  */
 
+/**
+ * `null` means the count could not be determined — never that it is zero.
+ *
+ * Every consumer has to handle it, which is the point: see `loadAccountSummary`.
+ */
 export type AccountSummary = {
-  sets: number;
-  attempts: number;
-  sessions: number;
-  scans: number;
+  sets: number | null;
+  attempts: number | null;
+  sessions: number | null;
+  scans: number | null;
   /** Whether a coach read is cached. Not user-authored, but it is their data. */
   hasCoachRead: boolean;
 };
@@ -28,22 +33,27 @@ export type AccountSummary = {
 export async function loadAccountSummary(userId: string): Promise<AccountSummary> {
   const db = createServiceClient();
   /**
-   * Throws rather than falling back to zero.
+   * Returns `null` on failure rather than 0, and never throws.
    *
-   * These numbers are the last thing a student reads before deleting something
-   * permanently, and "0" is the one wrong answer that changes their mind: a
-   * failed query would render as "nothing to lose" and disable the very
-   * safeguard that says otherwise. Failing the page is the safe direction.
+   * "0" is the one wrong answer that changes a student's mind — it reads as
+   * "nothing to lose" immediately before a permanent deletion — so a failed
+   * count must not become one. This originally threw for that reason, which
+   * was the wrong fix: a single flaky count then took down the whole page,
+   * and the page is the only route to the deletion controls. Someone trying to
+   * erase their data would find the controls gone, which is worse than a wrong
+   * number and much worse than an honest "—".
+   *
+   * Observed in production once, with an empty error message and a null count
+   * on one of five concurrent HEAD requests — transient, and not reproducible
+   * against the same database from elsewhere. It does not need to be diagnosed
+   * to be survived.
    */
-  const count = async (table: string, column: string) => {
+  const count = async (table: string, column: string): Promise<number | null> => {
     const { count: n, error } = await db
       .from(table)
       .select("*", { count: "exact", head: true })
       .eq(column, userId);
-    if (error || n === null) {
-      throw new Error(`Could not count ${table}: ${error?.message ?? "no count returned"}`);
-    }
-    return n;
+    return error ? null : n;
   };
   const [sets, attempts, sessions, scans, coach] = await Promise.all([
     count("problem_sets", "owner_id"),
@@ -52,7 +62,9 @@ export async function loadAccountSummary(userId: string): Promise<AccountSummary
     count("worksheet_uploads", "user_id"),
     count("coach_reads", "user_id"),
   ]);
-  return { sets, attempts, sessions, scans, hasCoachRead: coach > 0 };
+  // Unknown is not "no coach read", but there is nothing to show either way and
+  // it never gates a control.
+  return { sets, attempts, sessions, scans, hasCoachRead: (coach ?? 0) > 0 };
 }
 
 /**

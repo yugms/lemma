@@ -82,7 +82,9 @@ export default async function AccountPage() {
         ].map((stat) => (
           <div key={stat.label} className="bg-paper px-4 py-5">
             <dt className="mono-meta">{stat.label}</dt>
-            <dd className="display-md mt-1.5 text-section">{stat.value}</dd>
+            {/* An em dash, never a 0 — see loadAccountSummary. A wrong zero here
+                reads as "nothing to lose" right before a permanent deletion. */}
+            <dd className="display-md mt-1.5 text-section">{stat.value ?? "—"}</dd>
           </div>
         ))}
       </dl>
@@ -93,7 +95,7 @@ export default async function AccountPage() {
         </div>
         <p className="mt-5 max-w-xl text-sm leading-relaxed text-muted">
           None of this is recoverable, and none of it is reversible from here.
-          {summary.sets > 0 &&
+          {(summary.sets === null || summary.sets > 0) &&
             " Sets are the part worth pausing over — each one cost a slot against your daily limit to generate."}
         </p>
         <div className="mt-7">
