@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { Check, Eye, Layers, Play, ScanLine, Timer, X } from "lucide-react";
+import { Check, Eye, Layers, Play, Printer, ScanLine, Timer, X } from "lucide-react";
 import { ShareLink } from "@/components/share/share-link";
 import { getCurrentUser } from "@/lib/auth-server";
 import { loadSetForUser } from "@/lib/sets";
@@ -83,6 +83,16 @@ export default async function SetPage({ params }: { params: Promise<{ id: string
           >
             <Layers className="h-3.5 w-3.5" aria-hidden />
             Flashcards
+          </Link>
+          {/* Print and scan are two halves of one loop, so they sit together:
+              print the sheet, work it on paper, photograph it back in. */}
+          <Link
+            href={`/set/${set.id}/print`}
+            transitionTypes={["nav-forward"]}
+            className="btn btn-outline btn-sm"
+          >
+            <Printer className="h-3.5 w-3.5" aria-hidden />
+            Print worksheet
           </Link>
           <Link
             href={`/set/${set.id}/scan`}

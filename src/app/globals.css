@@ -848,3 +848,95 @@
     animation-delay: 0s !important;
   }
 }
+
+/* ── Print ──────────────────────────────────────────────────────────────
+   Worksheets (/set/[id]/print) are the reason this exists, but it applies
+   everywhere — printing any page should produce the content, not the
+   furniture.
+
+   The colour reset is load-bearing rather than tidy: the tokens follow the
+   reader's theme, and a plot drawn in dark mode is light strokes on a dark
+   fill, which prints as an unreadable black rectangle. Forcing the light
+   palette here overrides both the media query and an explicit [data-theme],
+   so a student practising at night still prints a legible sheet.        */
+
+@media print {
+  :root,
+  :root[data-theme="dark"],
+  :root[data-theme="light"] {
+    color-scheme: light;
+
+    --paper: #ffffff;
+    --surface: #ffffff;
+    --raised: #ffffff;
+    --sunk: #ffffff;
+
+    --fg: #000000;
+    --fg-muted: #333333;
+    --fg-faint: #555555;
+    --fg-ghost: #888888;
+
+    --line: #bbbbbb;
+    --line-strong: #666666;
+
+    --solid: #000000;
+    --on-solid: #ffffff;
+
+    --accent: #000000;
+    --accent-hover: #000000;
+    --accent-solid: #000000;
+    --accent-on: #ffffff;
+    --accent-line: #bbbbbb;
+    --accent-wash: #ffffff;
+
+    --ok: #000000;
+    --ok-line: #bbbbbb;
+    --ok-wash: #ffffff;
+
+    --bad: #000000;
+    --bad-line: #bbbbbb;
+    --bad-wash: #ffffff;
+
+    /* Paper has its own texture. */
+    --grain-opacity: 0;
+  }
+
+  /* The app frame is navigation, and navigation does not print. */
+  .site-header,
+  body > footer,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* Backgrounds and borders are how a worksheet's answer boxes and rules are
+     drawn, so they have to survive the browser's default "save the ink". */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* A problem broken across two sheets is unusable, and the answer key has to
+     start on its own page or it prints on the back of the last question. */
+  .break-inside-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .break-before-page {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  @page {
+    margin: 16mm 14mm;
+  }
+}

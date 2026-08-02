@@ -8,6 +8,7 @@ import {
 import { checkSubmission } from "../ai/check-answer";
 import { structuralCheck } from "../ai/verify";
 import { prepareProblem } from "../math-render";
+import { renderAnswer } from "../print-key";
 import { retryEligible, shouldDisclose } from "../attempt-state";
 
 /**
@@ -335,6 +336,19 @@ describe("every graph response kind survives the round trip", () => {
         });
       });
 
+      it("prints a usable answer key", () => {
+        const { content, answer } = splitProblem(problem);
+        const { answer_html, solution_plot_svg } = renderAnswer(content, answer);
+
+        if (content.response_kind === "sketch") {
+          // "Draw this" has a picture for an answer. A line of coefficients
+          // would leave whoever marks it to plot the key by hand.
+          expect(solution_plot_svg, "sketch key has no plot").toContain("<svg");
+        } else {
+          expect(answer_html.replace(/<[^>]*>/g, "").trim().length).toBeGreaterThan(0);
+        }
+      });
+
       it("keeps the answer key out of content", () => {
         const { content } = splitProblem(problem);
         const serialized = JSON.stringify(content);
@@ -420,6 +434,16 @@ describe("every format survives the round trip", () => {
         await expect(checkSubmission(content, answer, undefined)).resolves.toMatchObject({
           correct: false,
         });
+      });
+
+      it("prints a non-empty answer key", () => {
+        const { content, answer } = splitProblem(problem);
+        const { answer_html, solution_plot_svg } = renderAnswer(content, answer);
+
+        // A printed key with a blank beside a question number is worse than no
+        // key at all — it is only discovered once the sheet is being marked.
+        const text = answer_html.replace(/<[^>]*>/g, "").trim();
+        expect(text.length || solution_plot_svg?.length, "nothing to print").toBeTruthy();
       });
 
       it("pre-renders every displayed string to HTML", () => {
