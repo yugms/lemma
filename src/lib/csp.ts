@@ -16,6 +16,17 @@
  * those breaks visible UI to defend against a far smaller risk than script
  * injection, so `style-src` stays permissive while `script-src` does not.
  */
+/**
+ * Cloudflare Turnstile, which guards anonymous sign-up.
+ *
+ * Listed unconditionally rather than only when a site key is set: the CSP is
+ * built in the proxy, which is a different environment from the browser bundle,
+ * and a policy that silently differs between the two is exactly the kind of
+ * thing that passes every local check and then blocks a challenge in
+ * production. Naming a host the app may not contact costs nothing.
+ */
+const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
+
 export function contentSecurityPolicy({
   nonce,
   supabaseOrigin,
@@ -30,16 +41,24 @@ export function contentSecurityPolicy({
     `default-src 'self'`,
     // React uses eval in development to rebuild server stacks in the browser.
     // It does not in production, so the allowance is scoped to dev.
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
+    //
+    // The Turnstile host is redundant under `strict-dynamic` — the script is
+    // injected by app code, which already inherits trust — but browsers that
+    // predate `strict-dynamic` ignore it and fall back to this allowlist.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${TURNSTILE_ORIGIN}${isDev ? " 'unsafe-eval'" : ""}`,
     `style-src 'self' 'unsafe-inline'`,
     // `data:` covers the generated icon and OG routes; `blob:` covers the
     // object URLs the scan uploader makes to preview a photo before sending it.
     `img-src 'self' data: blob:`,
     // next/font self-hosts at build time, so nothing external is ever fetched.
     `font-src 'self'`,
-    // Dev needs the websocket for hot reload; production talks only to itself
-    // and to Supabase.
-    `connect-src 'self' ${supabaseOrigin}${isDev ? " ws: wss:" : ""}`,
+    // Dev needs the websocket for hot reload; production talks only to itself,
+    // to Supabase, and to Turnstile when a guest session is being created.
+    `connect-src 'self' ${supabaseOrigin} ${TURNSTILE_ORIGIN}${isDev ? " ws: wss:" : ""}`,
+    // Turnstile renders its challenge in an iframe. Without this the directive
+    // falls back to `default-src 'self'` and the challenge is blocked — which
+    // would break guest sign-in outright, so it is not optional.
+    `frame-src ${TURNSTILE_ORIGIN}`,
     `object-src 'none'`,
     `base-uri 'self'`,
     `form-action 'self'`,

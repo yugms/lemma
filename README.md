@@ -97,7 +97,19 @@ Everything runs on one shared free model quota, so each account is bounded per d
 Over the marking budget your answer is still graded — locally — and only the written diagnosis is withheld. That is the same degradation that already happens when the provider is unreachable, which is why it is safe to reach deliberately.
 
 > [!NOTE]
-> Anonymous sessions are issued by Supabase straight to the browser, so nothing in this codebase sees them. Per-user caps bound casual overuse; the defence against farming fresh guest accounts is Supabase's own auth rate limiting, which is a dashboard setting.
+> Anonymous sessions are issued by Supabase straight to the browser, so nothing in this codebase sees them and per-user caps only bound casual overuse. Farming fresh guest accounts is held off by two things outside the caps: Supabase's own IP rate limit (30/hour by default, a dashboard setting) and the Turnstile check below.
+
+### Guest sign-up protection
+
+Anyone can create a guest account here without an email address, which is the point — and also means a script could create them in bulk, each with a fresh daily allowance. `src/lib/captcha.ts` runs a Cloudflare Turnstile check once, at the moment a guest session is first created, and never again.
+
+It is **off unless `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set**: with no key nothing loads, Cloudflare is never contacted, and guest sign-in behaves exactly as it did before. Turning it on is two switches that must move together:
+
+1. Set `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (site key from the Cloudflare dashboard, free) and deploy.
+2. **Authentication → Attack Protection** in Supabase: enable Turnstile and paste the matching secret.
+
+> [!WARNING]
+> Doing (2) without (1) breaks **every** guest session, which is the default path through the whole app. Always set the key and deploy first. The reverse order is harmless — a token is simply ignored until Supabase is checking for one.
 
 ## Getting started
 
@@ -145,6 +157,7 @@ Then add your deployed origin under **Authentication → URL Configuration** (Si
 | `GEMINI_GENERATOR_MODELS` | no | `gemini-3.5-flash,gemini-3.6-flash,gemini-2.5-flash` |
 | `GEMINI_CHECKER_MODELS` | no | `gemini-3.5-flash-lite,gemini-2.5-flash-lite,gemini-2.5-flash` |
 | `GEMINI_CONCURRENCY` | no | `3` — free-tier limits are around 10 RPM |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | no | Cloudflare Turnstile site key. Unset, the guest-sign-up check is off entirely and nothing is loaded. Must be set **before** enabling CAPTCHA in Supabase — see [Guest sign-up protection](#guest-sign-up-protection) |
 
 The two model variables are comma-separated **preference-ordered chains**: later entries are tried only when earlier ones are rate-limited or overloaded, because free-tier Flash models return 503 in bursts.
 
@@ -255,6 +268,8 @@ Still open: leaked-password protection is off. It doesn't apply today (anonymous
 ## Privacy
 
 `/privacy` and `/terms` describe what the app actually does, and are worth reading before deploying your own instance — particularly the note that content sent through the free tier of Google AI Studio may be reviewed by Google. That matters most for worksheet scans, which can carry a student's name and handwriting. `/account` offers three levels of deletion, all immediate, with storage swept before the database cascade so no orphaned files survive.
+
+The policy names four processors: Supabase, Vercel, Google and Cloudflare. If you run an instance **without** Turnstile configured, the Cloudflare paragraph in `src/app/privacy/page.tsx` describes something that never happens and should be removed — a policy that over-discloses is safer than one that under-discloses, but neither is accurate.
 
 ## Notes for contributors
 

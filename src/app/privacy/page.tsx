@@ -125,6 +125,11 @@ export default function PrivacyPage() {
               detail:
                 "The Gemini models described above, and — only if you choose it — Google sign-in.",
             },
+            {
+              term: "Cloudflare",
+              detail:
+                "An anti-abuse check (Turnstile) that runs once, at the moment your guest session is first created, and never again. It exists because anyone can create guest accounts here without an email address, and without it a script could create them in bulk and exhaust the shared model quota for everyone. Cloudflare sees your IP address and some technical signals from your browser for that check. It does not track you across sites and is not used for advertising.",
+            },
           ]}
         />
         <p>
@@ -144,6 +149,11 @@ export default function PrivacyPage() {
         <p>
           Your light or dark theme preference is kept in your browser&apos;s local
           storage rather than a cookie, and is never sent to the server.
+        </p>
+        <p>
+          The one exception is Cloudflare&apos;s anti-abuse check described above, which
+          may set a short-lived cookie of its own while it runs. That happens once, when
+          a guest session is first created, and it is not something lemma reads.
         </p>
       </Section>
 

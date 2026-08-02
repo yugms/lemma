@@ -940,3 +940,35 @@
     margin: 16mm 14mm;
   }
 }
+
+/* ── Turnstile host ─────────────────────────────────────────────────────
+   The container src/lib/captcha.ts appends when a guest session is being
+   created. Ordinarily Turnstile passes silently and this stays a zero-size
+   element in the corner, so it must not dim or block anything by default.
+
+   When a challenge genuinely needs a click, `before-interactive-callback`
+   sets data-interactive and it becomes a centred modal. Doing it the other
+   way round — always a backdrop, hidden when unused — would flash a dimmed
+   screen at every visitor who never sees a challenge, which is most of
+   them.                                                                  */
+
+.captcha-host {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 60;
+  transform: translate(-50%, -50%);
+}
+
+.captcha-host[data-interactive="true"] {
+  display: grid;
+  place-items: center;
+  inset: 0;
+  left: 0;
+  top: 0;
+  transform: none;
+  /* Matches the paper token rather than plain black, so the dim reads as part
+     of the page in both themes. */
+  background: color-mix(in oklab, var(--paper) 78%, transparent);
+  backdrop-filter: blur(2px);
+}

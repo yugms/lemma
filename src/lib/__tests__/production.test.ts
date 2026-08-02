@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { contentSecurityPolicy, newNonce } from "../csp";
-import { siteUrl } from "../env";
+import { siteUrl, turnstileSiteKey } from "../env";
 import type { AccountSummary } from "../account";
 import { capFor, DAILY_LIMITS, startOfToday, type LimitKind } from "../limits";
 import { describeSignInError, SIGN_IN_FALLBACK } from "../auth-errors";
@@ -69,6 +69,27 @@ describe("content security policy", () => {
     expect(dev).not.toContain("upgrade-insecure-requests");
   });
 
+  it("lets the Turnstile challenge actually render", () => {
+    const csp = build(false);
+    const directive = (name: string) =>
+      csp.split("; ").find((d) => d.startsWith(`${name} `)) ?? "";
+
+    // The challenge is an iframe. With no frame-src at all it falls back to
+    // `default-src 'self'` and is blocked — which would break guest sign-in
+    // outright, and only in production, since nothing else on the site frames
+    // anything.
+    expect(directive("frame-src")).toContain("https://challenges.cloudflare.com");
+    expect(directive("connect-src")).toContain("https://challenges.cloudflare.com");
+    // Redundant under strict-dynamic, but browsers predating it ignore
+    // strict-dynamic and fall back to the allowlist.
+    expect(directive("script-src")).toContain("https://challenges.cloudflare.com");
+  });
+
+  it("still frames nothing itself", () => {
+    // Allowing Cloudflare to be framed by us must not become us being frameable.
+    expect(build(false)).toContain("frame-ancestors 'none'");
+  });
+
   it("mints a different nonce every time", () => {
     const nonces = new Set(Array.from({ length: 50 }, newNonce));
     expect(nonces.size).toBe(50);
@@ -130,6 +151,33 @@ describe("canonical site URL", () => {
     clear();
     expect(siteUrl()).toBe("http://localhost:3000");
     expect(siteUrl()).not.toContain("lemma.app");
+  });
+});
+
+describe("captcha is off unless configured", () => {
+  const saved = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+    else process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = saved;
+  });
+
+  it("reports no site key when unset or blank", () => {
+    // The safety property the whole feature rests on: with no key, captcha.ts
+    // loads no script, contacts Cloudflare not at all, and guest sign-in is
+    // byte-for-byte the behaviour that shipped before it. Shipping the code and
+    // enabling the check are therefore separate, reversible steps.
+    delete process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+    expect(turnstileSiteKey()).toBeNull();
+
+    // An empty string is what a half-filled Vercel env var looks like, and it
+    // must read as "off" rather than as a key that will fail every challenge.
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "";
+    expect(turnstileSiteKey()).toBeNull();
+  });
+
+  it("reports the key when set", () => {
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "0x4AAAAAAATest";
+    expect(turnstileSiteKey()).toBe("0x4AAAAAAATest");
   });
 });
 

@@ -125,6 +125,17 @@ Two rules. The answer key is behind `?key=1` and `loadAnswerKey()` **re-proves o
 
 Both the key renderer (`print-key.ts`) and the on-paper answer space (`components/print/answer-space.tsx`) end in `assertNeverFormat`, so adding a format is a compile error here too — the failure they prevent is a question printed with nowhere to answer it, which is only discovered once the sheet is handed out.
 
+### Guest sign-up has a CAPTCHA, and it is two coupled switches
+
+`src/lib/captcha.ts` solves a Cloudflare Turnstile challenge inside `ensureUser()`, only on the path that creates a *new* anonymous user — so once per browser, not per action. All four `ensureUser()` call sites are unchanged.
+
+**It is off unless `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set**, and that is load-bearing: with no key nothing is loaded and Cloudflare is never contacted, so the code can ship independently of the dashboard change. Enabling CAPTCHA in Supabase *without* the key set breaks every guest session — the default path through the entire app — so the key always goes first.
+
+Two things that will bite anyone touching this:
+
+- **`frame-src` is required.** Turnstile renders in an iframe, and with no `frame-src` the directive falls back to `default-src 'self'` and the challenge is blocked. The host is also in `script-src` purely for browsers that ignore `strict-dynamic`; under `strict-dynamic` the injected script inherits trust already.
+- **The privacy policy names Cloudflare as a processor.** It previously said "that is the complete list" of three. Any new third party the app contacts has to be added there in the same change, or the policy becomes false.
+
 ### Security headers and the CSP nonce
 
 Static headers live in `next.config.ts`; the CSP is built per request in `src/proxy.ts` because it carries a nonce. The proxy sets it on the *request* as well as the response — Next parses the request's CSP header during render and stamps the nonce onto every script it emits. Anything the app injects itself needs the nonce by hand, which today is the theme script in `layout.tsx` (blocked → a flash of the wrong theme on every load).

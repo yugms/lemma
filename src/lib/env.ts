@@ -50,6 +50,20 @@ export function geminiApiKey(): string {
 }
 
 /**
+ * Cloudflare Turnstile's public site key, or `null` when not configured.
+ *
+ * Optional by design, and that is the whole safety property: unset means no
+ * script is loaded, nothing is sent to Cloudflare, and guest sign-in behaves
+ * exactly as it did before. Setting it is what turns the anti-abuse check on.
+ *
+ * Site keys are public — they are read by the browser and appear in the page.
+ * The matching *secret* lives only in Supabase's dashboard, never here.
+ */
+export function turnstileSiteKey(): string | null {
+  return process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || null;
+}
+
+/**
  * The canonical origin, without a trailing slash.
  *
  * Order matters, and the reason is a bug this replaced: the old fallback was a
