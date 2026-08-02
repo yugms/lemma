@@ -48,6 +48,16 @@ export const MODE_RULES: Record<
   scan: { scored: true, discloses: true, offersRetry: false },
 };
 
+/**
+ * The modes that count as evidence about what a student can do.
+ *
+ * Derived rather than listed, so a new mode is classified once. Anything
+ * reading practice history — the review queue especially — has to filter on
+ * this: a flashcard is repeatable with the solution one click away, so a rep
+ * that happens to go well says nothing about whether a gap closed.
+ */
+export const SCORED_MODES = ATTEMPT_MODES.filter((m) => MODE_RULES[m].scored);
+
 export function retryEligible(
   setId: string | null,
   first: AttemptRecord | null,

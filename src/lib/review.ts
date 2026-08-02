@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import { SCORED_MODES } from "@/lib/attempt-state";
 import { capFor, startOfToday } from "@/lib/limits";
 import { newShareCode } from "@/lib/share-code";
 import type { ProblemFormat } from "@/lib/ai/schemas";
@@ -41,7 +42,7 @@ export type MissedProblem = {
   lastAt: string;
 };
 
-type MissRow = {
+export type MissRow = {
   problem_id: string;
   is_correct: boolean | null;
   created_at: string;
@@ -57,12 +58,21 @@ type MissRow = {
 };
 
 /**
- * Everything the student has missed, worst first.
+ * Everything the student has missed and not yet put right, worst first.
  *
  * Ranked by miss count, then by age: a problem missed three times outranks one
  * missed yesterday, and among equals the stalest comes first because that is
  * the one closest to being forgotten outright. Problems already put right on a
  * retry sink below the rest — the student has shown they can do those.
+ *
+ * A problem leaves the queue once the *most recent* first attempt on it was
+ * correct. This is the whole point of the page: "Practise these 4" builds a
+ * fresh set of exactly these problems, and until this rule existed, getting
+ * them all right left the queue saying four. The loop had no exit, and the
+ * remedy the page offers could never be seen to work.
+ *
+ * Most-recent rather than ever-correct, because the evidence expires: someone
+ * who answered it right in March and wrong last week has an open gap again.
  */
 export async function loadMissed(userId: string, limit = 40): Promise<MissedProblem[]> {
   const db = createServiceClient();
@@ -70,12 +80,14 @@ export async function loadMissed(userId: string, limit = 40): Promise<MissedProb
   const [{ data }, { data: retries }] = await Promise.all([
     db
       .from("attempts")
+      // Correct rows come back too — they are what closes a problem out, and
+      // without them the newest outcome per problem cannot be known.
       .select(
         "problem_id, is_correct, created_at, problems!inner(difficulty, format, content, topics!inner(title, units!inner(courses!inner(title))))"
       )
       .eq("user_id", userId)
       .eq("attempt_no", 1)
-      .not("is_correct", "is", true)
+      .in("mode", SCORED_MODES)
       .order("created_at", { ascending: false })
       .limit(1000),
     db
@@ -89,14 +101,43 @@ export async function loadMissed(userId: string, limit = 40): Promise<MissedProb
       .limit(1000),
   ]);
 
-  const recoveredIds = new Set(
-    ((retries ?? []) as { problem_id: string }[]).map((r) => r.problem_id)
+  return outstandingMisses(
+    (data ?? []) as unknown as MissRow[],
+    new Set(((retries ?? []) as { problem_id: string }[]).map((r) => r.problem_id)),
+    limit
   );
+}
+
+/**
+ * The queue rule itself, separated from the query so it can be tested against
+ * the orderings that matter — missed then put right, right then missed again,
+ * missed twice, revealed only.
+ *
+ * `rows` must be newest first: that ordering is what makes the first row seen
+ * for a problem its deciding outcome.
+ */
+export function outstandingMisses(
+  rows: MissRow[],
+  recoveredIds: Set<string>,
+  limit = 40
+): MissedProblem[] {
+  // Problems whose newest first attempt was correct — the gap closed.
+  const closed = new Set<string>();
+  const decided = new Set<string>();
+  for (const row of rows) {
+    if (!row.problems?.topics || decided.has(row.problem_id)) continue;
+    decided.add(row.problem_id);
+    if (row.is_correct === true) closed.add(row.problem_id);
+  }
 
   const byProblem = new Map<string, MissedProblem>();
-  for (const row of (data ?? []) as unknown as MissRow[]) {
+  for (const row of rows) {
     const p = row.problems;
     if (!p?.topics) continue;
+    if (closed.has(row.problem_id)) continue;
+    // An older correct answer on a problem that has since been missed again.
+    // It is not a miss, and it is no longer evidence of anything.
+    if (row.is_correct === true) continue;
 
     const existing = byProblem.get(row.problem_id);
     if (existing) {
@@ -167,6 +208,9 @@ export async function loadDueTopics(
       )
       .eq("user_id", userId)
       .eq("attempt_no", 1)
+      // Same reason as the queue: a flashcard rep is not evidence, so it must
+      // not make a topic look recently practised either.
+      .in("mode", SCORED_MODES)
       .order("created_at", { ascending: false })
       .limit(DUE_ROW_LIMIT),
     db
