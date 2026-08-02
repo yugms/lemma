@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { ViewTransition } from "react";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { Geist, Geist_Mono, Fraunces } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
@@ -7,6 +8,7 @@ import { THEME_SCRIPT } from "@/components/theme-toggle";
 import { Wordmark } from "@/components/brand";
 import { getCurrentUser, toHeaderUser } from "@/lib/auth-server";
 import { loadActiveSession } from "@/lib/study-session";
+import { siteUrl } from "@/lib/env";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,7 +41,7 @@ const fraunces = Fraunces({
   display: "swap",
 });
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://lemma.app";
+const SITE_URL = siteUrl();
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -96,6 +98,9 @@ export default async function RootLayout({
   const authUser = await getCurrentUser();
   const user = toHeaderUser(authUser);
 
+  // Set by the proxy, which is also what puts it in the CSP header.
+  const nonce = (await headers()).get("x-nonce");
+
   // A running study session shows on every page, so the lookup lives here.
   // Guests don't get sessions, which also keeps this off the common path.
   const session =
@@ -108,8 +113,11 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} h-full antialiased`}
     >
       <head>
-        {/* Applies the stored theme before first paint. */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/* Applies the stored theme before first paint. Next stamps its own
+            scripts with the nonce automatically, but this one is ours, so it
+            has to be tagged by hand or the CSP blocks it — and a blocked theme
+            script means a flash of the wrong theme on every load. */}
+        <script nonce={nonce ?? undefined} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body className="flex min-h-full flex-col">
         <a

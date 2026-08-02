@@ -18,10 +18,20 @@ import { clearHistory, deleteAllData, deleteAccount, loadAccountSummary } from "
  * rid of, and no way to try again.
  */
 describe.skipIf(!process.env.SUPABASE_SECRET_KEY)("account deletion", () => {
-  const db = createServiceClient();
+  /**
+   * Built on first use, not in the describe body.
+   *
+   * `skipIf` skips the *tests*; the callback itself still runs at collection
+   * time, so a client constructed here was constructed even with no key set —
+   * which threw `supabaseUrl is required` and failed `npm run test` offline,
+   * the one thing this suite's skip exists to prevent.
+   */
+  let client: ReturnType<typeof createServiceClient> | null = null;
+  const database = () => (client ??= createServiceClient());
 
   /** A user with one set, one item and one attempt against it. */
   async function seed() {
+    const db = database();
     // `.invalid` is reserved by RFC 2606 and can never resolve, so a stray
     // confirmation mail has nowhere to go even if one were ever sent.
     const { data, error } = await db.auth.admin.createUser({
@@ -90,7 +100,7 @@ describe.skipIf(!process.env.SUPABASE_SECRET_KEY)("account deletion", () => {
       await deleteAllData(userId);
       expect(await loadAccountSummary(userId)).toMatchObject({ sets: 0, attempts: 0 });
 
-      const { data } = await db.auth.admin.getUserById(userId);
+      const { data } = await database().auth.admin.getUserById(userId);
       expect(data.user, "the account itself must survive").not.toBeNull();
     } finally {
       await deleteAccount(userId);
@@ -103,7 +113,7 @@ describe.skipIf(!process.env.SUPABASE_SECRET_KEY)("account deletion", () => {
     const result = await deleteAccount(userId);
     expect(result.error).toBeUndefined();
 
-    const { data } = await db.auth.admin.getUserById(userId);
+    const { data } = await database().auth.admin.getUserById(userId);
     expect(data.user).toBeNull();
 
     // Every user-owned table is ON DELETE CASCADE from auth.users. If that ever
@@ -116,7 +126,7 @@ describe.skipIf(!process.env.SUPABASE_SECRET_KEY)("account deletion", () => {
       ["coach_reads", "user_id"],
       ["worksheet_uploads", "user_id"],
     ] as const) {
-      const { count } = await db
+      const { count } = await database()
         .from(table)
         .select("*", { count: "exact", head: true })
         .eq(column, userId);
@@ -124,7 +134,7 @@ describe.skipIf(!process.env.SUPABASE_SECRET_KEY)("account deletion", () => {
     }
 
     // The set's items go with the set, not with the user, so check the chain.
-    const { count: items } = await db
+    const { count: items } = await database()
       .from("problem_set_items")
       .select("*", { count: "exact", head: true })
       .eq("set_id", setId);

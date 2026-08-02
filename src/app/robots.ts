@@ -1,6 +1,5 @@
 import type { MetadataRoute } from "next";
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://lemma.app";
+import { siteUrl } from "@/lib/env";
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -8,8 +7,10 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: "*",
       allow: "/",
       // Owner-scoped and auth-gated; nothing there is crawlable anyway.
-      disallow: ["/api/", "/set/", "/auth/"],
+      // /account holds a signed-in user's data controls, and /signin is a
+      // redirect target — neither is a useful search result.
+      disallow: ["/api/", "/set/", "/auth/", "/account", "/signin"],
     },
-    sitemap: `${SITE_URL}/sitemap.xml`,
+    sitemap: `${siteUrl()}/sitemap.xml`,
   };
 }
