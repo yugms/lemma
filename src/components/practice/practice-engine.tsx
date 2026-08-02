@@ -220,12 +220,19 @@ export function PracticeEngine({
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const el = document.activeElement as HTMLElement | null;
+      // `slider` is the graph sketch handles, which move on the arrow keys.
+      // The handle stops propagation itself, so this is redundant today; it is
+      // stated anyway because this list is where "which controls own the
+      // arrows" is written down, and a control that forgets to stop the event
+      // should degrade to doing nothing rather than to turning the page.
+      const role = el?.getAttribute("role");
       if (
         el &&
         (el.tagName === "INPUT" ||
           el.tagName === "TEXTAREA" ||
           el.tagName === "SELECT" ||
-          el.getAttribute("role") === "radio" ||
+          role === "radio" ||
+          role === "slider" ||
           el.isContentEditable)
       ) {
         return;

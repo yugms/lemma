@@ -142,6 +142,11 @@ export function GraphSketchInput({
                     : null;
                   if (!step) return;
                   e.preventDefault();
+                  // The practice engine pages through the set on Left/Right.
+                  // Without this the handle moved *and* the page turned, which
+                  // threw the sketch away mid-answer — so the keyboard route
+                  // this control advertises could never place a point.
+                  e.stopPropagation();
                   nudge(i, step[0], step[1]);
                 }}
               />

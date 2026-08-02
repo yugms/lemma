@@ -320,7 +320,15 @@ export function ProblemCard({
    * live the inputs are the student's again, and while one is merely offered
    * the answer key hasn't been sent — `result.answer` is deliberately absent.
    */
-  const marked = answered && !retrying;
+  /**
+   * Whether the inputs may show a verdict on themselves.
+   *
+   * `quiet` has to be part of this. Under quiz conditions the response carries
+   * no answer key, so every option looked "not the correct one" and the
+   * student's own pick was styled as the wrong answer — on every question,
+   * right or wrong, directly above "you'll see how you did when you hand in".
+   */
+  const marked = answered && !retrying && !quiet;
   const key = marked ? result?.answer : undefined;
   // Every incorrect option, not just the one picked: the rationales explain why
   // each was tempting, and reading the traps you avoided is where most of the
@@ -838,7 +846,7 @@ export function ProblemCard({
                         <Math html={s.math_html} />
                       </div>
                     )}
-                    <p className="text-sm leading-relaxed text-muted">{s.note}</p>
+                    <Prose html={s.note_html} className="text-sm leading-relaxed text-muted" />
                   </div>
                 </li>
               ))}

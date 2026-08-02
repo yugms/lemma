@@ -68,14 +68,20 @@ export default async function SetPage({ params }: { params: Promise<{ id: string
             outcomes under timed conditions; flashcards are repeatable recall
             that deliberately never touches this set's score. */}
         <div className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-2">
-          <Link
-            href={`/set/${set.id}/quiz`}
-            transitionTypes={["nav-forward"]}
-            className="btn btn-outline btn-sm"
-          >
-            <Timer className="h-3.5 w-3.5" aria-hidden />
-            Quiz yourself
-          </Link>
+          {/* A quiz only runs on an untouched set — the route redirects to
+              practice once anything has an outcome. Offering the button anyway
+              made it look broken, so it goes away when it would no longer do
+              what it says. */}
+          {!started && (
+            <Link
+              href={`/set/${set.id}/quiz`}
+              transitionTypes={["nav-forward"]}
+              className="btn btn-outline btn-sm"
+            >
+              <Timer className="h-3.5 w-3.5" aria-hidden />
+              Quiz yourself
+            </Link>
+          )}
           <Link
             href={`/set/${set.id}/flashcards`}
             transitionTypes={["nav-forward"]}

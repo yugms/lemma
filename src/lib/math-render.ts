@@ -51,12 +51,50 @@ export function renderMath(latex: string, display = false): string {
 }
 
 /**
- * Render prose containing inline \( \) and display \[ \] math segments,
- * plus {{n}} placeholders rendered as small blank markers.
+ * Escape sequences that survived JSON decoding as literal characters.
+ *
+ * A model writing "\\n\\n" in its output leaves a backslash and an "n" in the
+ * decoded string, which rendered verbatim in the middle of a question.
+ *
+ * The lookahead excludes a following *lowercase* letter, which is what
+ * distinguishes this from a real macro: `\nu`, `\neq`, `\nabla`, `\times`,
+ * `\text` all continue in lowercase, while the sequence that actually turns up
+ * is `\n` against a newline, a space, or a capitalised next word — "\\n\\nOrder
+ * the steps", where matching greedily would invent a macro called `\nOrder`.
+ * The casualties are the uppercase-continued negations (`\nRightarrow`), which
+ * no problem in this catalogue uses.
  */
-export function renderProse(text: string): string {
+function normalizeEscapes(text: string): string {
+  return text.replace(/\\r\\n|\\[nr](?![a-z])/g, "\n").replace(/\\t(?![a-z])/g, " ");
+}
+
+/**
+ * A run of undelimited LaTeX sitting in ordinary prose — the `\frac{7}{25}` in
+ * "can be represented by the fraction \frac{7}{25}."
+ *
+ * Models are told to wrap inline math in \( \) and mostly do, but a field named
+ * `latex` invites them to write the macro bare, and the result was rendering as
+ * source text. Recognising it here means the convention is a preference rather
+ * than a requirement. The optional numeric prefix catches `28\%`, where the
+ * number belongs to the expression that follows it.
+ */
+const BARE_MATH =
+  String.raw`(?:\d+(?:\.\d+)?\s*)?(?:\\[a-zA-Z]+(?:\s*\{[^{}]*\})*|\\[%$&#_])(?:\s*(?:\\[a-zA-Z]+(?:\s*\{[^{}]*\})*|\\[%$&#_]|\{[^{}]*\}))*`;
+
+/**
+ * Render prose containing inline \( \) and display \[ \] math segments,
+ * plus {{n}} placeholders rendered as small blank markers. Undelimited LaTeX
+ * is picked up too — see `BARE_MATH`.
+ */
+export function renderProse(raw: string): string {
+  const text = normalizeEscapes(raw);
   let out = "";
-  const regex = /\\\((.+?)\\\)|\\\[([\s\S]+?)\\\]|\{\{(\d+)\}\}/g;
+  // Delimited forms are listed first so a `\(` is never mistaken for the start
+  // of a bare run; the alternation is ordered, and both start at a backslash.
+  const regex = new RegExp(
+    String.raw`\\\((.+?)\\\)|\\\[([\s\S]+?)\\\]|\{\{(\d+)\}\}|(${BARE_MATH})`,
+    "g"
+  );
   let last = 0;
   let m: RegExpExecArray | null;
 
@@ -66,13 +104,46 @@ export function renderProse(text: string): string {
       out += renderMath(m[1]);
     } else if (m[2] !== undefined) {
       out += `<span class="my-3 block text-center">${renderMath(m[2], true)}</span>`;
-    } else {
+    } else if (m[3] !== undefined) {
       out += `<span class="mx-1 inline-flex min-w-14 items-center justify-center border-b border-line-strong px-2 font-mono text-xs text-faint">${escapeHtml(m[3])}</span>`;
+    } else {
+      out += renderMath(m[4].trim());
     }
     last = regex.lastIndex;
   }
   if (last < text.length) out += escapeHtml(text.slice(last));
   return out;
+}
+
+/** Two ordinary words in a row: this is a sentence, not an expression. */
+const PROSE_RUN = /[A-Za-z]{2,}\s+[A-Za-z]{2,}/;
+
+/** Anything that could belong to an expression rather than a sentence. */
+const MATH_SIGNAL = /\\[a-zA-Z]+|[\\^_{}=+\-*/<>]|\d/;
+
+/** Macros and their arguments removed, so `\cdot` doesn't read as a word. */
+function withoutMath(text: string): string {
+  return text.replace(/\\[a-zA-Z]+/g, " ").replace(/\{[^{}]*\}/g, " ");
+}
+
+/**
+ * Render a fragment that may be a bare expression, a sentence, or a sentence
+ * with math in it — choices, ordering steps and matching columns are all three
+ * depending on the problem.
+ *
+ * Picking one renderer for those fields was the bug: `renderMath` put whole
+ * sentences into math mode, which strips the spaces between words, and
+ * `renderProse` left bare expressions showing their source. Neither field can
+ * be assumed, so the shape is detected instead.
+ */
+export function renderInline(raw: string): string {
+  const text = normalizeEscapes(raw).trim();
+  if (!text) return "";
+  // The author used the convention, so trust it.
+  if (/\\\(|\\\[|\{\{\d+\}\}/.test(text)) return renderProse(text);
+  // No math anywhere in it — a phrase like "the power rule".
+  if (!MATH_SIGNAL.test(text)) return renderProse(text);
+  return PROSE_RUN.test(withoutMath(text)) ? renderProse(text) : renderMath(text);
 }
 
 /** Convenience for nullable fields (hints, notes). */
@@ -92,14 +163,15 @@ export function prepareProblem(p: SanitizedProblem): PreparedProblem {
     blanks_count: p.blanks_count,
     statement_html: renderProse(p.statement_latex),
     hint_html: renderProseOrNull(p.hint),
-    choices: p.choices?.map((c) => ({ id: c.id, html: renderMath(c.latex) })),
-    // Ordering steps are prose-with-math, not bare expressions — a step reads
-    // "divide both sides by \(3\)", so it needs renderProse, not renderMath.
-    items: p.items?.map((i) => ({ id: i.id, html: renderProse(i.latex) })),
-    // Matching columns hold bare expressions on one side and often a phrase on
-    // the other ("the power rule"), so both go through renderProse.
-    left: p.left?.map((l) => ({ id: l.id, html: renderProse(l.latex) })),
-    right: p.right?.map((r) => ({ id: r.id, html: renderProse(r.latex) })),
+    // These four are all `renderInline` for the same reason: what they hold
+    // depends on the problem. An MCQ choice is usually a bare expression but a
+    // select-all choice is a full sentence; an ordering step reads "divide both
+    // sides by \(3\)" or just "y = -\frac{9}{4}"; a matching column is bare
+    // expressions on one side and phrases on the other.
+    choices: p.choices?.map((c) => ({ id: c.id, html: renderInline(c.latex) })),
+    items: p.items?.map((i) => ({ id: i.id, html: renderInline(i.latex) })),
+    left: p.left?.map((l) => ({ id: l.id, html: renderInline(l.latex) })),
+    right: p.right?.map((r) => ({ id: r.id, html: renderInline(r.latex) })),
     parts: p.parts?.map((part) => ({
       label: part.label,
       prompt_html: renderProse(part.prompt_latex),

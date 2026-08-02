@@ -20,6 +20,17 @@ import {
  * ignoring precedence — not a nearby number.
  */
 
+/**
+ * Parenthesise negatives only.
+ *
+ * Wrapping every operand produced "(11) - (10)", which reads to a student as
+ * though the brackets mean something. They only carry information when the
+ * operand is signed.
+ */
+function operand(n: number): string {
+  return n < 0 ? `(${n})` : `${n}`;
+}
+
 /* ── Integer operations ──────────────────────────────────────────── */
 
 export const integerOperations: Template = {
@@ -39,10 +50,10 @@ export const integerOperations: Template = {
 
     if (op === "\\times") {
       value = a * b;
-      statement = `Evaluate: \\[(${a}) \\times (${b})\\]`;
+      statement = `Evaluate: \\[${operand(a)} \\times ${operand(b)}\\]`;
       steps = [
         {
-          latex: `(${a}) \\times (${b})`,
+          latex: `${operand(a)} \\times ${operand(b)}`,
           note: "Multiply the sizes, then decide the sign.",
         },
         {
@@ -59,17 +70,17 @@ export const integerOperations: Template = {
       ];
     } else if (op === "-") {
       value = a - b;
-      statement = `Evaluate: \\[(${a}) - (${b})\\]`;
+      statement = `Evaluate: \\[${operand(a)} - ${operand(b)}\\]`;
       steps = [
-        { latex: `(${a}) - (${b})`, note: "Subtracting is adding the opposite." },
-        { latex: `${a}${signedTerm(-b)}`, note: `Rewrite as ${a} plus ${-b}.` },
+        { latex: `${operand(a)} - ${operand(b)}`, note: "Subtracting is adding the opposite." },
+        { latex: `${a}${signedTerm(-b)}`, note: `Rewrite as \\(${a}\\) plus \\(${-b}\\).` },
         { latex: `${value}`, note: "Add." },
       ];
     } else {
       value = a + b;
-      statement = `Evaluate: \\[(${a}) + (${b})\\]`;
+      statement = `Evaluate: \\[${operand(a)} + ${operand(b)}\\]`;
       steps = [
-        { latex: `(${a}) + (${b})`, note: "Start with the sum." },
+        { latex: `${operand(a)} + ${operand(b)}`, note: "Start with the sum." },
         {
           latex: `${value}`,
           note:
@@ -99,9 +110,13 @@ export const integerOperations: Template = {
           { value: -value, misconception: "Correct size, wrong sign." },
           {
             value: op === "-" ? a + b : a - b,
+            // There is only a double negative to miss when the subtrahend is
+            // itself negative; on "11 - 10" that sentence described nothing.
             misconception:
               op === "-"
-                ? "Added instead of subtracting — the double negative was missed."
+                ? b < 0
+                  ? "Added instead of subtracting — the double negative was missed."
+                  : "Added instead of subtracting."
                 : "Subtracted instead of adding.",
           },
           {

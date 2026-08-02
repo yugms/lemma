@@ -112,7 +112,11 @@ export type OpenAnswer = z.infer<typeof OpenAnswerSchema>;
 
 export const ExplanationStepSchema = z.object({
   latex: z.string().describe("The math for this step in LaTeX (may be empty for prose-only steps)"),
-  note: z.string().describe("Short plain-English explanation of what happened in this step"),
+  note: z
+    .string()
+    .describe(
+      "Short plain-English explanation of what happened in this step. Prose: wrap any inline math in \\( \\)"
+    ),
 });
 export type ExplanationStep = z.infer<typeof ExplanationStepSchema>;
 
@@ -135,7 +139,9 @@ export const McqProblemSchema = z.object({
   format: z.literal("mcq"),
   choices: z
     .array(z.object({ id: z.enum(["A", "B", "C", "D", "E"]), latex: z.string() }))
-    .describe("4-5 answer choices"),
+    .describe(
+      "4-5 answer choices. A bare LaTeX expression when the choice is one, e.g. \\frac{3}{8}. If a choice is a sentence, write prose and wrap the math in \\( \\)"
+    ),
   correct_choice_id: z.enum(["A", "B", "C", "D", "E"]),
   distractor_rationales: z
     .array(
@@ -172,7 +178,9 @@ export const MultiSelectProblemSchema = z.object({
   format: z.literal("multi_select"),
   choices: z
     .array(z.object({ id: z.enum(CHOICE_IDS), latex: z.string() }))
-    .describe("4-6 statements, of which more than one may be correct"),
+    .describe(
+      "4-6 statements, of which more than one may be correct. These are sentences, so write prose and wrap any inline math in \\( \\) — never put a whole sentence in LaTeX"
+    ),
   correct_choice_ids: z
     .array(z.enum(CHOICE_IDS))
     .describe("Every correct choice. At least one, and never all of them"),
@@ -196,7 +204,9 @@ export const OrderingProblemSchema = z.object({
   format: z.literal("ordering"),
   items: z
     .array(z.object({ id: z.enum(CHOICE_IDS), latex: z.string() }))
-    .describe("3-6 steps, listed in the scrambled order the student should see"),
+    .describe(
+      "3-6 steps, listed in the scrambled order the student should see. A step that is purely an equation may be bare LaTeX; a step that reads as a sentence must be prose with its math in \\( \\)"
+    ),
   correct_order: z
     .array(z.enum(CHOICE_IDS))
     .describe("Every item id, in the correct order. Must not match the listed order"),
@@ -212,11 +222,13 @@ export const MatchingProblemSchema = z.object({
   format: z.literal("matching"),
   left: z
     .array(z.object({ id: z.enum(CHOICE_IDS), latex: z.string() }))
-    .describe("3-5 prompts to match, labelled A, B, C, ..."),
+    .describe(
+      "3-5 prompts to match, labelled A, B, C, ... Bare LaTeX for an expression; prose with math in \\( \\) for a phrase"
+    ),
   right: z
     .array(z.object({ id: z.enum(MATCH_TARGET_IDS), latex: z.string() }))
     .describe(
-      "Candidate matches labelled 1, 2, 3, ... Include 1-2 extras that match nothing"
+      "Candidate matches labelled 1, 2, 3, ... Include 1-2 extras that match nothing. Same convention as the left column"
     ),
   correct_pairs: z
     .array(
@@ -667,7 +679,12 @@ export type CheckResponse = {
     target_curve?: AuthoredCurve;
     solution_plot_svg?: string;
   };
-  explanation?: { steps: { math_html: string | null; note: string }[] };
+  /**
+   * `note_html`, not `note`: a step note is prose that can carry inline math,
+   * and shipping it raw meant students read `\(2, 5\)` as source. Every other
+   * prose field on this response is pre-rendered; this one was the exception.
+   */
+  explanation?: { steps: { math_html: string | null; note_html: string }[] };
   /**
    * Why each wrong choice was tempting, authored alongside the problem. Sent
    * only once an attempt is on record — same disclosure rule as `explanation`.

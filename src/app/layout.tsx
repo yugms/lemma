@@ -59,6 +59,9 @@ export const metadata: Metadata = {
     "calculus",
     "worked solutions",
   ],
+  // Relative, so Next resolves it against metadataBase per route rather than
+  // pinning every page's canonical to the homepage.
+  alternates: { canonical: "./" },
   openGraph: {
     type: "website",
     siteName: "lemma",

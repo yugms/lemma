@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
-import { renderMath, renderProse } from "@/lib/math-render";
+import { renderInline, renderMath, renderProse } from "@/lib/math-render";
 import { curveFromAuthored, plotFromSpec, renderPlot } from "@/lib/plot";
 import {
   assertNeverFormat,
@@ -81,7 +81,9 @@ export function renderAnswer(
       const chosen = content.choices?.find((c) => c.id === id);
       return {
         answer_html: chosen
-          ? `<strong>${escape(id)}.</strong> ${renderMath(chosen.latex)}`
+          ? // renderInline, not renderMath: a choice may be a sentence, and a
+            // sentence in math mode loses the spaces between its words.
+            `<strong>${escape(id)}.</strong> ${renderInline(chosen.latex)}`
           : `<strong>${escape(id)}</strong>`,
       };
     }

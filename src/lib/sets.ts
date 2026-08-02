@@ -366,9 +366,13 @@ export async function* buildProblemSet(
   }
 
   // --- 4. create the set ---
+  // A bare "+" before the em dash read as a typo ("One-step equations + —
+   // level 2"), so the count it stands for is spelled out.
+  const named = topicInfos.map((t) => t.title);
+  const extra = named.length - 2;
   const title =
     config.title ??
-    `${topicInfos.map((t) => t.title).slice(0, 2).join(" & ")}${topicInfos.length > 2 ? " +" : ""} — level ${config.difficulty}`;
+    `${named.slice(0, 2).join(" & ")}${extra > 0 ? ` +${extra} more` : ""} — level ${config.difficulty}`;
   const { data: set, error: setErr } = await db
     .from("problem_sets")
     .insert({

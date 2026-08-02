@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { checkSubmission, wrongAnswerFeedback } from "@/lib/ai/check-answer";
-import { renderMath, renderProse } from "@/lib/math-render";
+import { renderInline, renderMath, renderProse } from "@/lib/math-render";
 import { curveFromAuthored, plotFromSpec, renderPlot } from "@/lib/plot";
 import { assertNeverFormat } from "@/lib/ai/schemas";
 import { ATTEMPT_MODES, MODE_RULES, retryEligible, shouldDisclose } from "@/lib/attempt-state";
@@ -130,7 +130,9 @@ export async function POST(request: NextRequest) {
       case "mcq":
         return {
           correct_choice_id: answer.correct_choice_id,
-          value_html: renderMath(
+          // Matches how the choice itself was rendered — a sentence choice
+          // would otherwise read back as run-together math in the verdict.
+          value_html: renderInline(
             content.choices?.find((c) => c.id === answer.correct_choice_id)?.latex ?? ""
           ),
         };
@@ -189,7 +191,7 @@ export async function POST(request: NextRequest) {
   const explanationDisplay = (): NonNullable<CheckResponse["explanation"]> => ({
     steps: (explanation.steps ?? []).map((s) => ({
       math_html: s.latex ? renderMath(s.latex) : null,
-      note: s.note,
+      note_html: renderProse(s.note),
     })),
   });
 
