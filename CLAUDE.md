@@ -17,7 +17,9 @@ npx tsc --noEmit       # typecheck — there is no npm script for this
 npx vitest run src/lib/__tests__/core.test.ts   # one test file
 npx vitest run -t "normalizeMath"               # one test by name
 
-# live-provider.test.ts self-skips without GEMINI_API_KEY; it needs env loaded:
+# Live tests self-skip without their key, so `npm run test` stays offline.
+# Run them with env loaded — live-provider needs GEMINI_API_KEY,
+# live-account needs SUPABASE_SECRET_KEY:
 node --env-file=.env.local ./node_modules/vitest/vitest.mjs run src/lib/__tests__/live-provider.test.ts
 ```
 
@@ -51,8 +53,7 @@ Two budgets exist because delivering a short set beats delivering nothing: `buil
 - **Throws** only when the entire model chain is rate-limited/overloaded/timed out, which is worth surfacing to the student.
 - Models are preference-ordered chains (`GENERATOR_MODELS`, `CHECKER_MODELS`), env-overridable. Free-tier Flash models return 503 in bursts, so each role falls through to an older sibling. Retryability is classified by `isRetryable()`; only capacity errors fall through to the next model.
 - Gemini 3.x takes `thinkingLevel`, 2.5 takes `thinkingBudget` — `thinkingConfigFor()` sends only what a given model understands.
-
-- Optional `images` turn the call multimodal (`contents` becomes a parts array). Every model in both chains already reads images, so worksheet scanning needs no separate chain. Nothing else may talk to the SDK, which is why image support lives here rather than in the scanning code.
+- Optional `images` make the call multimodal (`contents` becomes a parts array). Every model in both chains already reads images, so scanning needs no separate chain — and the one-choke-point rule is why image support lives here rather than in the scanning code.
 
 **Gemini JSON Schema constraint:** `$ref` is only supported in non-required properties, so every schema must be fully inlined (`z.toJSONSchema(..., { reused: "inline" })`). A regression here fails at request time with an opaque 400, so `provider-schema.test.ts` asserts no `$ref`/`$defs`/`$schema` in any schema sent to a model. This is also why generation requests one *generation kind* at a time with a flat schema (`batchSchemaFor`, `repairSchemaFor`) rather than the discriminated union.
 
@@ -88,6 +89,8 @@ One set of zod schemas defines model structured outputs, the `problems` jsonb co
 
 Auth is anonymous-by-default: `ensureUser()` calls `signInAnonymously()`, and Google sign-in uses `linkIdentity()` for anonymous users so the user id — and therefore all history — survives the upgrade. Daily set caps live in `buildProblemSet` (5 guest / 20 signed-in). A guest's identity lives only in their session cookie, so clearing it orphans their sets permanently — don't clear cookies to test the signed-out state; fetch with `credentials: "omit"` instead.
 
+**Sign-in depends on three dashboard settings, and none of them are in this repo.** Anonymous sign-ins, the Google provider (client ID/secret, with the redirect URI pointing at `<project>.supabase.co/auth/v1/callback` — *not* at the app), and **Allow manual linking**, which `linkIdentity()` requires and which is off by default. With it off every guest sign-in returns `404 manual_linking_disabled`; with the provider off, `400 validation_failed / "provider is not enabled"`. Both are invisible from the code, so when sign-in fails read `error_code` in the Supabase auth logs before touching anything — `src/lib/auth-errors.ts` maps those codes to the copy shown on `/signin`, and the callback forwards the real code rather than a generic flag precisely so the page can name the cause. The MCP server cannot read or write auth config; these are dashboard-only.
+
 Server Actions (`src/app/sets/actions.ts`) use the RLS-scoped server client deliberately: the `delete own sets` policy *is* the authorization check, so a forged id matches no rows. At the DB level `problem_set_items.set_id` cascades, but `attempts.set_id` is `ON DELETE SET NULL` — practice history outlives the set it was earned in, which is why deleting a set can't fail on a foreign key.
 
 ### Worksheet scanning
@@ -95,6 +98,8 @@ Server Actions (`src/app/sets/actions.ts`) use the RLS-scoped server client deli
 `src/app/set/[id]/scan` → the browser uploads photos straight into the private `worksheet-scans` bucket under `${userId}/...` (which is what the storage policies key on, and keeps megabytes of photo out of the serverless request body), then `POST /api/scan` marks them.
 
 `grade-scan.ts` asks the model for two separable things and the schema keeps them apart: *transcribing* the handwriting and *judging* the maths. `confidence` scores the transcription only. Anything below `SCAN_CONFIDENCE_THRESHOLD` is withheld from `attempts` and returned as `needs_confirmation` for the student to confirm — a confident misread would otherwise become permanent wrong history, which is the one failure mode that makes scanning worse than not having it.
+
+**Confidence is not the only such gate.** `wasAttempted()` is the other, and it exists because the first one did not cover the case that actually happened: a page numbered "6)" with nothing after it came back `found: true, read_answer: "", correct: false, confidence: 1`, sailed through the threshold — the model was *correctly* certain it had read a blank — and was recorded as a miss. Confidence guards misreading; "not attempted" is a different failure and needs its own rule. A blank is therefore decided server-side, never recorded and never offered for confirmation, and the results view scores out of what was attempted so a half-finished page reads 3/3 rather than 3/6. The general lesson: each new way of being wrong needs its own gate, not a wider threshold on an existing one.
 
 Scanned marks are written as `attempts` rows with `mode: "scan"` (`scored`, no retry — the paper is already written), so they feed Review, Stats and the coach like typed practice. Rows are inserted one at a time because `attempts_one_per_attempt` makes duplicates *expected* — the student may have typed some problems already — and a batch insert would lose every mark to one collision. A conflict skips that problem and leaves the earlier outcome standing.
 
@@ -128,14 +133,13 @@ Deletes use the service client with a `userId` resolved server-side, never one p
 
 ## Presentation layer
 
-### Two invariants keep the client bundle small
+### Three invariants keep the client bundle small
 
-Both are easy to undo by accident and neither fails loudly.
-
-0. **Plots are drawn in Node too.** `src/lib/plot.ts` renders a declarative spec (window, curves, marks, grid) to an SVG string; `prepareProblem()` calls it and ships `plot_svg`. Same reasoning as KaTeX — the plot is a fixed stimulus that never animates or re-fits, so it does not justify a charting library in the client bundle. Colours are CSS custom properties, so plots follow the theme without the module knowing which one is active. The geometry half (`plotGeometry`, `curveFromHandles`) is pure arithmetic and *is* imported by the interactive overlays, so the axes and the click targets agree by construction rather than by two copies of the same transform.
+All three are easy to undo by accident and none of them fail loudly.
 
 1. **KaTeX never reaches the browser.** `src/lib/math-render.ts` (`renderMath`, `renderProse`, `prepareProblem`) runs KaTeX in Node; `src/components/latex.tsx` only injects the resulting HTML and must not import `katex`. Server Components and `/api/check` pre-render every expression — which is why `CheckResponse` carries `*_html` fields rather than LaTeX. Importing `katex` from a Client Component silently adds ~275 kB. `renderProse` escapes its text segments, since it builds a string where React used to escape for us.
 2. **The Supabase browser SDK is lazily imported.** Auth is resolved server-side by `getCurrentUser()` in `src/lib/auth-server.ts` (wrapped in React `cache`, so the root layout and the page share one round-trip) and handed to `AuthButton` as a plain prop. `@/lib/auth` is `await import(...)`-ed at the point of a click or a submit. A top-level import from any client component puts ~64 kB gzipped back on every route.
+3. **Plots are drawn in Node too.** `src/lib/plot.ts` renders a declarative spec (window, curves, marks, grid) to an SVG string; `prepareProblem()` calls it and ships `plot_svg`. Same reasoning as KaTeX — the plot is a fixed stimulus that never animates or re-fits, so it does not justify a charting library in the bundle. Colours are CSS custom properties, so plots follow the theme without this module knowing which one is active. The geometry half (`plotGeometry`, `curveFromHandles`) is pure arithmetic and *is* imported by the interactive overlays, so the drawn axes and the click targets agree by construction rather than by two copies of the same transform.
 
 ### Practice progress is derived, not stored
 
