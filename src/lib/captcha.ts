@@ -35,6 +35,7 @@ const SOLVE_TIMEOUT_MS = 45_000;
 
 type TurnstileOptions = {
   sitekey: string;
+  action: string;
   callback: (token: string) => void;
   "error-callback": () => void;
   "timeout-callback": () => void;
@@ -144,6 +145,10 @@ export async function solveCaptcha(): Promise<string | null> {
     try {
       widgetId = turnstile.render(host, {
         sitekey,
+        // Labels the challenge in Cloudflare's own analytics. There is exactly
+        // one surface here, so it buys little locally; it is the marker
+        // Cloudflare's setup guide asks integrations to send.
+        action: "turnstile-spin-v2",
         appearance: "interaction-only",
         theme: "auto",
         callback: succeed,
