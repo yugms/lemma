@@ -86,6 +86,12 @@ export const viewport: Viewport = {
 const FOOTER_LINKS = [
   { href: "/build", label: "Build a set" },
   { href: "/sets", label: "My sets" },
+  // /account is here as well as under your own name in the header: the privacy
+  // policy promises deletion controls, and a promise that depends on finding an
+  // unlabelled control is not much of one.
+  { href: "/account", label: "Your data" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/terms", label: "Terms" },
 ];
 
 export default async function RootLayout({
@@ -167,7 +173,7 @@ export default async function RootLayout({
                 Every problem independently verified
               </p>
             </div>
-            <nav aria-label="Footer" className="flex items-center gap-6">
+            <nav aria-label="Footer" className="flex flex-wrap items-center gap-x-6 gap-y-2">
               {FOOTER_LINKS.map((l) => (
                 <Link
                   key={l.href}
