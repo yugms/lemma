@@ -127,23 +127,37 @@ function withoutMath(text: string): string {
 }
 
 /**
+ * Which of the two renderers a fragment needs.
+ *
+ * Exported because verification has to check a fragment the same way it will
+ * be displayed. When the two disagreed, every select-all problem was thrown
+ * away before it reached anyone: the field was documented as prose, the model
+ * wrote prose, and `structuralCheck` still required the whole string to parse
+ * as one LaTeX expression.
+ */
+export function inlineShape(raw: string): "empty" | "prose" | "math" {
+  const text = normalizeEscapes(raw).trim();
+  if (!text) return "empty";
+  // The author used the convention, so trust it.
+  if (/\\\(|\\\[|\{\{\d+\}\}/.test(text)) return "prose";
+  // No math anywhere in it — a phrase like "the power rule".
+  if (!MATH_SIGNAL.test(text)) return "prose";
+  return PROSE_RUN.test(withoutMath(text)) ? "prose" : "math";
+}
+
+/**
  * Render a fragment that may be a bare expression, a sentence, or a sentence
  * with math in it — choices, ordering steps and matching columns are all three
  * depending on the problem.
  *
- * Picking one renderer for those fields was the bug: `renderMath` put whole
- * sentences into math mode, which strips the spaces between words, and
- * `renderProse` left bare expressions showing their source. Neither field can
- * be assumed, so the shape is detected instead.
+ * Picking one renderer per field was the bug: `renderMath` put whole sentences
+ * into math mode, which strips the spaces between words, and `renderProse`
+ * left bare expressions showing their source. Neither field has one shape, so
+ * the shape is detected instead.
  */
 export function renderInline(raw: string): string {
   const text = normalizeEscapes(raw).trim();
-  if (!text) return "";
-  // The author used the convention, so trust it.
-  if (/\\\(|\\\[|\{\{\d+\}\}/.test(text)) return renderProse(text);
-  // No math anywhere in it — a phrase like "the power rule".
-  if (!MATH_SIGNAL.test(text)) return renderProse(text);
-  return PROSE_RUN.test(withoutMath(text)) ? renderProse(text) : renderMath(text);
+  return inlineShape(text) === "math" ? renderMath(text) : renderProse(text);
 }
 
 /** Convenience for nullable fields (hints, notes). */

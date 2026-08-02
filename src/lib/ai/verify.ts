@@ -9,6 +9,7 @@ import {
   SolverResultSchema,
 } from "@/lib/ai/schemas";
 import { curveFromAuthored, curvesMatch, plotFromSpec, pointsMatch } from "@/lib/plot";
+import { inlineShape } from "@/lib/math-render";
 import {
   checkMultiAnswer,
   checkOpenAnswer,
@@ -51,24 +52,33 @@ export function structuralCheck(p: GeneratedProblem): { ok: boolean; reason?: st
   if (p.explanation_steps.length === 0) return { ok: false, reason: "no explanation steps" };
 
   /**
-   * Shared by every format presenting a labelled list. Choices are bare LaTeX;
-   * ordering steps are prose that may embed math ("divide both sides by \(3\)"),
-   * so they are validated the way the statement is.
+   * Shared by every format presenting a labelled list.
+   *
+   * None of these fields has a single shape: an MCQ choice is usually a bare
+   * expression but a select-all choice is a sentence, an ordering step is
+   * either, and a matching column is expressions on one side and phrases on
+   * the other. `inlineShape` is the same call the renderer makes, so a
+   * fragment is checked the way it will be displayed rather than the way one
+   * format happened to assume.
    */
   const checkOptions = (
     options: { id: string; latex: string }[],
     min: number,
-    noun: string,
-    mode: "math" | "prose" = "math"
+    noun: string
   ): { ok: boolean; reason?: string } => {
     const ids = options.map((o) => o.id);
     if (new Set(ids).size !== ids.length) return { ok: false, reason: `duplicate ${noun} ids` };
     if (options.length < min) return { ok: false, reason: `too few ${noun}s` };
     for (const o of options) {
-      const bad = mode === "prose" ? proseOk(o.latex) : renderOk(o.latex) ? null : o.latex;
+      const bad = inlineShape(o.latex) === "math" ? (renderOk(o.latex) ? null : o.latex) : proseOk(o.latex);
       if (bad) return { ok: false, reason: `${noun} latex fails: ${bad}` };
     }
-    const normalized = options.map((o) => normalizeMath(o.latex));
+    // Prose is compared as written. `normalizeMath` exists to decide whether
+    // two *expressions* are the same answer, and putting sentences through it
+    // is as likely to collide two distinct statements as to catch a repeat.
+    const normalized = options.map((o) =>
+      inlineShape(o.latex) === "math" ? normalizeMath(o.latex) : o.latex.trim().toLowerCase()
+    );
     if (new Set(normalized).size !== normalized.length)
       return { ok: false, reason: `duplicate ${noun} values` };
     return { ok: true };
@@ -114,7 +124,7 @@ export function structuralCheck(p: GeneratedProblem): { ok: boolean; reason?: st
       return { ok: true };
     }
     case "ordering": {
-      const opts = checkOptions(p.items, 3, "item", "prose");
+      const opts = checkOptions(p.items, 3, "item");
       if (!opts.ok) return opts;
       const shown = p.items.map((i) => i.id);
       if (p.correct_order.length !== shown.length)

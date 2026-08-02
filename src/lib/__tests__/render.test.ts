@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { prepareProblem, renderInline, renderProse } from "../math-render";
-import type { SanitizedProblem } from "../ai/schemas";
+import { inlineShape, prepareProblem, renderInline, renderProse } from "../math-render";
+import { structuralCheck } from "../ai/verify";
+import type { GeneratedProblem, SanitizedProblem } from "../ai/schemas";
 
 /**
  * What a model actually writes into the `latex` fields, versus what the
@@ -86,6 +87,87 @@ describe("renderProse", () => {
   it("still handles display math and blank placeholders", () => {
     expect(renderProse("so \\[x = 2\\]")).toContain("block");
     expect(renderProse("x = {{1}}")).toContain("font-mono");
+  });
+});
+
+describe("structuralCheck agrees with the renderer", () => {
+  /**
+   * The checker and the renderer have to read a fragment the same way. When
+   * they did not, telling the model that select-all choices are sentences —
+   * which they are — meant every one it wrote was rejected before delivery,
+   * because the checker still demanded that the whole string parse as one
+   * LaTeX expression.
+   */
+  const selectAll = (choices: { id: "A" | "B" | "C" | "D"; latex: string }[]): GeneratedProblem => ({
+    format: "multi_select",
+    style: "conceptual",
+    difficulty: 2,
+    statement_latex: "Select every true statement.",
+    hint: null,
+    explanation_steps: [{ latex: "", note: "Check each one." }],
+    choices,
+    correct_choice_ids: ["A"],
+    distractor_rationales: [
+      { choice_id: "B", misconception: "Confused the two." },
+      { choice_id: "C", misconception: "Dropped a factor." },
+      { choice_id: "D", misconception: "Used the wrong base." },
+    ],
+  });
+
+  it("accepts select-all choices written as sentences", () => {
+    const result = structuralCheck(
+      selectAll([
+        { id: "A", latex: "The portion who play is \\(\\frac{7}{25}\\)." },
+        { id: "B", latex: "The portion who play is equivalent to \\(2.8\\%\\)." },
+        { id: "C", latex: "The portion who do not play is \\(0.72\\)." },
+        { id: "D", latex: "The percentage who play is \\(28\\%\\)." },
+      ])
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("accepts select-all choices written with undelimited math", () => {
+    const result = structuralCheck(
+      selectAll([
+        { id: "A", latex: "The portion who play is \\frac{7}{25}." },
+        { id: "B", latex: "The portion who play is 2.8\\%." },
+        { id: "C", latex: "The portion who do not play is 0.72." },
+        { id: "D", latex: "The percentage who play is 28\\%." },
+      ])
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("still accepts bare expressions", () => {
+    const result = structuralCheck(
+      selectAll([
+        { id: "A", latex: "\\frac{7}{25}" },
+        { id: "B", latex: "0.28" },
+        { id: "C", latex: "28\\%" },
+        { id: "D", latex: "\\frac{18}{25}" },
+      ])
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("still rejects two choices that say the same thing", () => {
+    const result = structuralCheck(
+      selectAll([
+        { id: "A", latex: "The portion who play is one quarter." },
+        { id: "B", latex: "The portion who play is one quarter." },
+        { id: "C", latex: "0.72" },
+        { id: "D", latex: "\\frac{18}{25}" },
+      ])
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("classifies every shape the checker and renderer share", () => {
+    expect(inlineShape("\\frac{5}{8}")).toBe("math");
+    expect(inlineShape("The portion who play is \\frac{7}{25}.")).toBe("prose");
+    expect(inlineShape("divide both sides by \\(3\\)")).toBe("prose");
+    expect(inlineShape("the power rule")).toBe("prose");
+    expect(inlineShape("   ")).toBe("empty");
   });
 });
 
