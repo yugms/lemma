@@ -74,7 +74,9 @@ export function SiteHeader({
         <div className="flex items-center gap-2 sm:gap-3">
           {sessionStartedAt && <SessionChip startedAt={sessionStartedAt} />}
           <ThemeToggle />
-          <AuthButton user={user} />
+          {/* Sign-in returns to whatever the reader was on, except /signin
+              itself — coming back to the sign-in page reads as a failure. */}
+          <AuthButton user={user} next={pathname === "/signin" ? "/" : pathname} />
         </div>
       </div>
     </header>

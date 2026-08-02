@@ -5,7 +5,9 @@ import { newShareCode } from "@/lib/share-code";
 import {
   problemHashInput,
   splitProblem,
+  type AuthoredPlot,
   type GeneratedProblem,
+  type GraphResponseKind,
   type ProblemFormat,
   type ProblemStyle,
   type SanitizedProblem,
@@ -433,6 +435,12 @@ type ItemRow = {
       choices?: { id: string; latex: string }[];
       blanks_count?: number;
       items?: { id: string; latex: string }[];
+      left?: { id: string; latex: string }[];
+      right?: { id: string; latex: string }[];
+      parts?: { label: string; prompt_latex: string }[];
+      plot?: AuthoredPlot;
+      response_kind?: GraphResponseKind;
+      sketch_kind?: string;
     };
     topics: { title: string } | null;
   } | null;
@@ -460,6 +468,12 @@ export function sanitizeItems(items: unknown): SanitizedProblem[] {
       choices: i.problems!.content.choices,
       blanks_count: i.problems!.content.blanks_count,
       items: i.problems!.content.items,
+      left: i.problems!.content.left,
+      right: i.problems!.content.right,
+      parts: i.problems!.content.parts,
+      plot: i.problems!.content.plot,
+      response_kind: i.problems!.content.response_kind,
+      sketch_kind: i.problems!.content.sketch_kind,
       topic_title: i.problems!.topics?.title,
     }));
 }

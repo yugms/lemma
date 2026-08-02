@@ -6,6 +6,16 @@ import { Check, CornerDownLeft, Eye, Lightbulb, Loader2, RotateCcw, X } from "lu
 import { Math, Prose } from "@/components/latex";
 import { MultiSelectInput } from "@/components/problem-inputs/multi-select";
 import { CorrectOrder, OrderingInput } from "@/components/problem-inputs/ordering";
+import { MatchingInput } from "@/components/problem-inputs/matching";
+import { MultiPartInput } from "@/components/problem-inputs/multi-part";
+import { GraphPointsInput, type Point } from "@/components/problem-inputs/graph-points";
+import {
+  curveFromHandles,
+  defaultHandles,
+  GraphSketchInput,
+  type Handle,
+  type SketchKind,
+} from "@/components/problem-inputs/graph-sketch";
 import { assertNeverFormat, type CheckResponse, type PreparedProblem } from "@/lib/ai/schemas";
 import { STYLE_LABELS } from "@/lib/format";
 
@@ -17,6 +27,49 @@ type Seed = {
   blanks: Record<string, string>;
   selected: string[];
   order: string[];
+  pairs: Record<string, string>;
+  parts: Record<string, string>;
+  points: Point[];
+  handles: Handle[];
+};
+
+/** Which curve family a sketch problem asks for, defaulting to a line. */
+function sketchKind(p: PreparedProblem): SketchKind {
+  const k = p.sketch_kind;
+  return k === "quadratic" || k === "abs" ? k : "linear";
+}
+
+/** Curve -> the coefficient form the answer key is stored in. */
+function curveToPayload(c: ReturnType<typeof curveFromHandles>) {
+  if (!c) return null;
+  switch (c.kind) {
+    case "linear":
+      return { kind: "linear", coeffs: [c.m, c.b] };
+    case "quadratic":
+      return { kind: "quadratic", coeffs: [c.a, c.b, c.c] };
+    case "abs":
+      return { kind: "abs", coeffs: [c.a, c.h, c.k] };
+    default:
+      return null;
+  }
+}
+
+const asPoints = (v: unknown): Point[] =>
+  Array.isArray(v)
+    ? v.flatMap((p) => {
+        const { x, y } = (p ?? {}) as { x?: unknown; y?: unknown };
+        return typeof x === "number" && typeof y === "number" ? [{ x, y }] : [];
+      })
+    : [];
+
+/** A `{ key: string }` submission off the wire, with anything else dropped. */
+const asStringMap = (v: unknown): Record<string, string> => {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof val === "string") out[k] = val;
+  }
+  return out;
 };
 
 const asStringList = (v: unknown): string[] =>
@@ -32,6 +85,12 @@ function seedFrom(problem: PreparedProblem, submitted: unknown): Seed {
     // Ordering always starts from the scrambled order the problem was stored in,
     // so the server-rendered list and the hydrated one agree.
     order: (problem.items ?? []).map((i) => i.id),
+    pairs: {},
+    parts: {},
+    points: [],
+    handles: problem.plot_window
+      ? defaultHandles(sketchKind(problem), problem.plot_window)
+      : [],
   };
   switch (problem.format) {
     case "mcq":
@@ -57,6 +116,21 @@ function seedFrom(problem: PreparedProblem, submitted: unknown): Seed {
         [...stored].sort().join() === [...empty.order].sort().join();
       return { ...empty, order: valid ? stored : empty.order };
     }
+    case "matching":
+      return { ...empty, pairs: asStringMap(submitted) };
+    case "multi_part":
+      return { ...empty, parts: asStringMap(submitted) };
+    case "graph":
+      if (problem.response_kind === "value") {
+        return { ...empty, open: typeof submitted === "string" ? submitted : "" };
+      }
+      if (problem.response_kind === "points") {
+        return { ...empty, points: asPoints(submitted) };
+      }
+      // A sketch is submitted as the fitted curve, not as handle positions —
+      // two placements describe the same line — so review restarts from the
+      // defaults rather than trying to invert the fit.
+      return empty;
     default:
       return assertNeverFormat(problem.format);
   }
@@ -101,6 +175,10 @@ export function ProblemCard({
   const [blankAnswers, setBlankAnswers] = useState<Record<string, string>>(seed.blanks);
   const [selected, setSelected] = useState<string[]>(seed.selected);
   const [order, setOrder] = useState<string[]>(seed.order);
+  const [pairs, setPairs] = useState<Record<string, string>>(seed.pairs);
+  const [partAnswers, setPartAnswers] = useState<Record<string, string>>(seed.parts);
+  const [points, setPoints] = useState<Point[]>(seed.points);
+  const [handles, setHandles] = useState<Handle[]>(seed.handles);
   const [showHint, setShowHint] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CheckResponse | null>(initialResult);
@@ -131,6 +209,24 @@ export function ProblemCard({
         return selected.length > 0;
       case "ordering":
         return order.length > 0;
+      case "matching":
+        // Every prompt needs a pairing — a partly-filled grid submitted early
+        // is a guaranteed miss, since matching is graded all-or-nothing.
+        return (
+          (problem.left ?? []).length > 0 &&
+          (problem.left ?? []).every((l) => (pairs[l.id] ?? "").length > 0)
+        );
+      case "multi_part":
+        return (
+          (problem.parts ?? []).length > 0 &&
+          (problem.parts ?? []).every((p) => (partAnswers[p.label] ?? "").trim().length > 0)
+        );
+      case "graph":
+        if (problem.response_kind === "value") return openAnswer.trim().length > 0;
+        if (problem.response_kind === "points") return points.length > 0;
+        // A vertical line or a zero-width parabola has no equation to submit,
+        // so the fit failing is exactly the case to keep the button inert.
+        return curveFromHandles(sketchKind(problem), handles) !== null;
       default:
         return assertNeverFormat(problem.format);
     }
@@ -157,6 +253,16 @@ export function ProblemCard({
         return selected;
       case "ordering":
         return order;
+      case "matching":
+        return pairs;
+      case "multi_part":
+        return partAnswers;
+      case "graph":
+        if (problem.response_kind === "value") return openAnswer;
+        if (problem.response_kind === "points") return points;
+        // Send the curve, not the handles: the answer is which graph they
+        // produced, and the grader compares curves.
+        return curveToPayload(curveFromHandles(sketchKind(problem), handles));
       default:
         return assertNeverFormat(problem.format);
     }
@@ -373,6 +479,94 @@ export function ProblemCard({
           disabled={inert || busy}
           graded={key?.correct_order}
           onReorder={setOrder}
+        />
+      )}
+
+      {problem.format === "matching" && (
+        <MatchingInput
+          left={problem.left ?? []}
+          right={problem.right ?? []}
+          value={pairs}
+          disabled={inert || busy}
+          graded={key?.correct_pairs}
+          onChange={(leftId, rightId) =>
+            setPairs((prev) => ({ ...prev, [leftId]: rightId }))
+          }
+        />
+      )}
+
+      {problem.format === "graph" && problem.plot_window && (
+        <>
+          {problem.response_kind === "points" && (
+            <GraphPointsInput
+              svg={problem.plot_svg ?? ""}
+              window={problem.plot_window}
+              selected={points}
+              disabled={inert || busy}
+              graded={key?.correct_points}
+              onToggle={(p) =>
+                setPoints((prev) =>
+                  prev.some((q) => q.x === p.x && q.y === p.y)
+                    ? prev.filter((q) => !(q.x === p.x && q.y === p.y))
+                    : [...prev, p]
+                )
+              }
+            />
+          )}
+
+          {problem.response_kind === "sketch" && (
+            <GraphSketchInput
+              svg={problem.plot_svg ?? ""}
+              window={problem.plot_window}
+              kind={sketchKind(problem)}
+              handles={handles}
+              disabled={inert || busy}
+              solutionSvg={key?.solution_plot_svg}
+              onMove={(i, next) =>
+                setHandles((prev) => prev.map((h, j) => (j === i ? next : h)))
+              }
+            />
+          )}
+
+          {problem.response_kind === "value" && (
+            <div className="mt-8">
+              {/* The plot is the question here, so it is shown but not touched. */}
+              <div
+                className="overflow-hidden rounded-[3px] border border-line bg-surface [&>svg]:block"
+                dangerouslySetInnerHTML={{ __html: problem.plot_svg ?? "" }}
+              />
+              <div className="relative mt-4">
+                <input
+                  value={openAnswer}
+                  disabled={inert || busy}
+                  onChange={(e) => setOpenAnswer(e.target.value)}
+                  onKeyDown={trySubmitFromKey}
+                  placeholder="y = 2x + 1"
+                  aria-label="Your answer"
+                  className="field pr-11 font-mono"
+                />
+                {submittable && !answered && (
+                  <CornerDownLeft
+                    aria-hidden
+                    className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-faint"
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {problem.format === "multi_part" && (
+        <MultiPartInput
+          parts={problem.parts ?? []}
+          values={partAnswers}
+          disabled={inert || busy}
+          answers={key?.part_answers}
+          onSubmitKey={trySubmitFromKey}
+          onChange={(label, value) =>
+            setPartAnswers((prev) => ({ ...prev, [label]: value }))
+          }
         />
       )}
 

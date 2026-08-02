@@ -22,6 +22,8 @@ Format rules:
 - fill_blank: write the statement with placeholders {{1}}, {{2}}, ... and provide one answer per blank. Blanks should be short (a number or short expression).
 - multi_select: 4-6 statements labeled A-F about a single situation, of which MORE THAN ONE may be true. At least one must be correct and at least one must be wrong — never make them all correct. List every correct letter in correct_choice_ids. Each wrong statement needs an entry in distractor_rationales naming the misconception that makes it look true. This format is for checking whether a student can distinguish several closely related claims, so the statements should be near-misses of each other, not a grab bag.
 - ordering: give 3-6 genuine steps of one solution, labeled A-F. Put them in \`items\` ALREADY SCRAMBLED — the listed order must not be the correct order — and give the true sequence of letters in correct_order. Every item must be an actual step of the method (a transformed equation, a rule applied); do not include a restatement of the problem or a bare "start here". The point is to test whether the student knows which step comes first, so the steps must not be trivially orderable by size or complexity alone.
+- matching: 3-5 prompts in \`left\` labeled A-F, and their candidates in \`right\` labeled 1-7. Give exactly one correct_pairs entry per LEFT item. \`right\` must contain 1-2 MORE entries than \`left\` — plausible ones that pair with nothing — otherwise the final pair is free by elimination. The two columns must be genuinely different kinds of thing (expression ↔ its factored form, function ↔ its derivative, statement ↔ the rule that justifies it), never a list matched against a shuffled copy of itself.
+- multi_part: one situation split into 2-4 parts, labeled with short labels ("a", "b", "c"). Each part gets its own prompt_latex and its own OpenAnswer, filled in exactly as for the \`open\` format. Parts must build: part (b) should need part (a)'s result. If the parts are independent, it is not a multi-part problem — it is several problems, and you should write it as something else. Do not restate the shared setup in every part; put it once in statement_latex.
 
 LaTeX conventions:
 - statement_latex is prose with inline math wrapped in \\( \\) and display math in \\[ \\]. Choice latex, answer value_latex, and explanation step latex are RAW LaTeX (no delimiters).
@@ -38,6 +40,22 @@ Quality bar:
 - Problems must be original — do not reproduce famous competition problems verbatim.
 - Respect the requested difficulty per the rubric; do not drift easier.
 - Vary surface features (numbers, contexts, function types) across the batch so problems don't feel repetitive.`;
+
+export const SCAN_SYSTEM_PROMPT = `You are marking a student's handwritten math work from photographs of their page.
+
+You are doing two separate jobs. Keep them separate.
+
+1. TRANSCRIBE. Read what the student actually wrote, character by character, and put it in read_answer verbatim — including if it is wrong, incomplete, or crossed out. Do not tidy it up, do not finish their thought, and do not substitute what you think they meant. If they wrote "x = 2" and the answer is 3, read_answer is "x = 2".
+
+2. MARK. Compare that transcription against the accepted answer supplied for each problem and set correct accordingly.
+
+confidence is about job 1 ONLY: how sure you are that you read the handwriting correctly. A crisp "42" that is the wrong answer is high confidence and correct=false. A smudged digit you had to guess at is low confidence whether or not it turned out right. Score below 0.8 for anything ambiguous, faint, overwritten, cut off by the edge of the photo, or where two readings are plausible. This is what decides whether the student is asked to confirm your reading, so be honest rather than decisive.
+
+Accept mathematically equivalent forms: 0.5 and 1/2 and \\frac{1}{2} are the same answer, as are equivalent orderings of a solution set. Do not require the student's notation to match the key's.
+
+Mark only the final answer, not the method — the student is not being graded on presentation. If a problem does not appear on the pages at all, set found=false and correct=false rather than guessing at it.
+
+Write note in the second person, one sentence, addressed to the student.`;
 
 export const SOLVER_SYSTEM_PROMPT = `You are a careful math solver grading the quality of practice problems. Solve the given problem completely and independently. Do not assume the problem is correct — if it is ambiguous, self-contradictory, or unsolvable with standard techniques for its topic, say so via is_well_posed=false and explain the issue.
 

@@ -2,8 +2,12 @@ import { callStructured, GENERATOR_MODELS } from "@/lib/ai/provider";
 import { GENERATOR_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import {
   batchSchemaFor,
+  formatForKind,
+  kindOf,
+  kindsForFormat,
   repairSchemaFor,
   type GeneratedProblem,
+  type GenerationKind,
   type ProblemFormat,
   type ProblemStyle,
   type SolverResult,
@@ -34,7 +38,7 @@ export type GenerationRequest = {
 
 const MAX_PER_CALL = 6;
 
-const FORMAT_BRIEF: Record<ProblemFormat, string> = {
+const FORMAT_BRIEF: Record<GenerationKind, string> = {
   mcq: "multiple choice: 4-5 choices, exactly one correct, every distractor traceable to a specific misconception",
   open: "open answer: the student types the answer, so give a canonical form plus every acceptable alternate form",
   fill_blank:
@@ -43,11 +47,21 @@ const FORMAT_BRIEF: Record<ProblemFormat, string> = {
     "select all that apply: 4-6 statements about one situation, at least one correct and at least one wrong, never all correct — the wrong ones must be traps a student holding a specific misconception would fall for",
   ordering:
     "ordering: 3-6 solution steps for one problem. List them in `items` already scrambled (not the correct order), and give the true sequence in `correct_order`. Each step must be a real step of the method, not a restatement of the problem",
+  matching:
+    "matching: 3-5 prompts in `left` (A, B, C, ...) paired against candidates in `right` (1, 2, 3, ...). Include 1-2 extra right entries that match nothing, so the last pair can't be got for free. One `correct_pairs` entry per left item",
+  multi_part:
+    "multi-part: one situation broken into 2-4 labelled parts that build on each other, each with its own typed answer. Later parts should need the earlier result, so the whole thing is one problem rather than several stapled together",
+  graph_value:
+    "graph (read a value): draw a plot in `plot`, then ask for something the student must read off it — a slope, an intercept, a value of f at a point. The answer is typed, so fill `answer` exactly as for the open format",
+  graph_points:
+    "graph (identify points): draw a plot in `plot`, then ask the student to select specific points on it — the intercepts, the vertex, where two curves meet. Every point in `correct_points` must have INTEGER coordinates inside the window, and must not already be marked on the plot",
+  graph_sketch:
+    "graph (produce a curve): describe a target curve in words in the statement, and give it in `target_curve`. The student positions a curve to match, so `plot` should show the grid and any reference the question mentions — never the target curve itself",
 };
 
 function buildUserMessage(
   req: GenerationRequest,
-  format: ProblemFormat,
+  kind: GenerationKind,
   count: number,
   avoid: string[]
 ): string {
@@ -84,16 +98,23 @@ bracketed number of the topic it actually tests):
 ${topicLines}
 
 Requirements:
-- Format: ${format} — ${FORMAT_BRIEF[format]}
+- Format: ${formatForKind(kind)} — ${FORMAT_BRIEF[kind]}
 - Difficulty: ${req.difficulty} (per the rubric)
 - Allowed styles: ${req.styles.join(", ")} (distribute across them)${avoidBlock}${focusBlock}`;
 }
 
-/** Spread a count across the requested formats as evenly as possible. */
-function splitAcrossFormats(count: number, formats: ProblemFormat[]): Map<ProblemFormat, number> {
-  const plan = new Map<ProblemFormat, number>();
-  formats.forEach((f, i) => {
-    plan.set(f, Math.floor(count / formats.length) + (i < count % formats.length ? 1 : 0));
+/**
+ * Spread a count across the requested formats as evenly as possible.
+ *
+ * Works in generation kinds, not formats: asking for `graph` means asking for
+ * three different tasks, and splitting before the division is what stops a set
+ * of six graph problems being six of the same kind.
+ */
+function splitAcrossKinds(count: number, formats: ProblemFormat[]): Map<GenerationKind, number> {
+  const kinds = formats.flatMap(kindsForFormat);
+  const plan = new Map<GenerationKind, number>();
+  kinds.forEach((k, i) => {
+    plan.set(k, Math.floor(count / kinds.length) + (i < count % kinds.length ? 1 : 0));
   });
   return plan;
 }
@@ -108,24 +129,24 @@ export async function generateProblems(
 ): Promise<TaggedProblem[]> {
   const results: TaggedProblem[] = [];
 
-  for (const [format, wanted] of splitAcrossFormats(req.count, req.formats)) {
+  for (const [kind, wanted] of splitAcrossKinds(req.count, req.formats)) {
     let remaining = wanted;
     while (remaining > 0) {
       const n = Math.min(remaining, MAX_PER_CALL);
       const batch = await callStructured({
         models: GENERATOR_MODELS,
         system: GENERATOR_SYSTEM_PROMPT,
-        prompt: buildUserMessage(req, format, n, [
+        prompt: buildUserMessage(req, kind, n, [
           ...req.avoid,
           ...results.map((p) => p.statement_latex),
         ]),
-        schema: batchSchemaFor(format),
+        schema: batchSchemaFor(kind),
         maxOutputTokens: 30000,
         thinking: "medium",
         budgetMs: 150_000, // authoring a batch is the longest call we make
       });
       remaining -= n;
-      if (!batch) break; // model gave up on this format; keep the other formats
+      if (!batch) break; // model gave up on this kind; keep the other kinds
       // Clamp rather than discard: a bogus index is a tagging slip, not a bad problem.
       results.push(
         ...batch.problems.map((p) => ({
@@ -155,7 +176,7 @@ Independent solver's result:
 - chosen choice: ${solver.chosen_choice_id ?? "n/a"}
 - well-posed: ${solver.is_well_posed}${solver.issue ? `\n- issue: ${solver.issue}` : ""}
 - reasoning: ${solver.reasoning_summary}`,
-    schema: repairSchemaFor(problem.format),
+    schema: repairSchemaFor(kindOf(problem)),
     maxOutputTokens: 16000,
     thinking: "medium",
     budgetMs: 70_000,

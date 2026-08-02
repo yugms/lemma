@@ -22,8 +22,50 @@ export const PROBLEM_FORMATS = [
   "fill_blank",
   "multi_select",
   "ordering",
-] as const; // graph/matching/multi_part reserved in the DB enum, unused
+  "matching",
+  "multi_part",
+  "graph",
+] as const;
 export type ProblemFormat = (typeof PROBLEM_FORMATS)[number];
+
+/**
+ * What one authoring call asks for. `graph` is three genuinely different tasks
+ * sharing a DB format — reading a value off a plot, identifying points on it,
+ * and producing a curve — and a model writes each of them far better when the
+ * request and the schema speak about only one.
+ */
+export const GENERATION_KINDS = [
+  "mcq",
+  "open",
+  "fill_blank",
+  "multi_select",
+  "ordering",
+  "matching",
+  "multi_part",
+  "graph_value",
+  "graph_points",
+  "graph_sketch",
+] as const;
+export type GenerationKind = (typeof GENERATION_KINDS)[number];
+
+/** The DB format a generation kind produces. */
+export function formatForKind(kind: GenerationKind): ProblemFormat {
+  return kind.startsWith("graph_") ? "graph" : (kind as ProblemFormat);
+}
+
+/** The authoring kinds that can satisfy a requested format. */
+export function kindsForFormat(format: ProblemFormat): GenerationKind[] {
+  return format === "graph"
+    ? ["graph_value", "graph_points", "graph_sketch"]
+    : [format as GenerationKind];
+}
+
+/** Which kind an already-authored problem came from — needed to repair it. */
+export function kindOf(p: GeneratedProblem): GenerationKind {
+  return p.format === "graph"
+    ? (`graph_${p.response_kind}` as GenerationKind)
+    : (p.format as GenerationKind);
+}
 
 /**
  * Every format-dependent branch in this codebase ends in this. Adding a format
@@ -37,6 +79,14 @@ export function assertNeverFormat(x: never): never {
 
 const CHOICE_IDS = ["A", "B", "C", "D", "E", "F"] as const;
 export type ChoiceId = (typeof CHOICE_IDS)[number];
+
+/**
+ * Right-hand ids for `matching`. Digits rather than more letters so a pair
+ * reads unambiguously ("B→3"); two letter columns invite the author and the
+ * solver to disagree about which side a bare "C" refers to.
+ */
+const MATCH_TARGET_IDS = ["1", "2", "3", "4", "5", "6", "7"] as const;
+export type MatchTargetId = (typeof MATCH_TARGET_IDS)[number];
 
 export const OpenAnswerSchema = z.object({
   value_latex: z
@@ -152,14 +202,151 @@ export const OrderingProblemSchema = z.object({
     .describe("Every item id, in the correct order. Must not match the listed order"),
 });
 
+/**
+ * Match each prompt to its counterpart. The unmatched right-hand entries are
+ * load-bearing: with an equal number on both sides the last pair is free, so a
+ * student who knows n-1 of them scores n.
+ */
+export const MatchingProblemSchema = z.object({
+  ...baseFields,
+  format: z.literal("matching"),
+  left: z
+    .array(z.object({ id: z.enum(CHOICE_IDS), latex: z.string() }))
+    .describe("3-5 prompts to match, labelled A, B, C, ..."),
+  right: z
+    .array(z.object({ id: z.enum(MATCH_TARGET_IDS), latex: z.string() }))
+    .describe(
+      "Candidate matches labelled 1, 2, 3, ... Include 1-2 extras that match nothing"
+    ),
+  correct_pairs: z
+    .array(
+      z.object({
+        left_id: z.enum(CHOICE_IDS),
+        right_id: z.enum(MATCH_TARGET_IDS),
+      })
+    )
+    .describe("Exactly one entry per left item, each naming its correct right id"),
+});
+
+/**
+ * One problem in several parts, where a later part builds on an earlier one.
+ * Graded all-or-nothing, like `fill_blank`: partial credit would make the set
+ * score mean something different for this format than for every other.
+ */
+export const MultiPartProblemSchema = z.object({
+  ...baseFields,
+  format: z.literal("multi_part"),
+  parts: z
+    .array(
+      z.object({
+        label: z.string().describe("Short part label, e.g. 'a', 'b', 'c'"),
+        prompt_latex: z
+          .string()
+          .describe("What this part asks. Prose with inline math in \\( \\)"),
+        answer: OpenAnswerSchema,
+      })
+    )
+    .describe("2-4 parts, each answerable on its own once the previous is done"),
+});
+
+/* ── Graph ────────────────────────────────────────────────────────── */
+
+export const GRAPH_RESPONSE_KINDS = ["value", "points", "sketch"] as const;
+export type GraphResponseKind = (typeof GRAPH_RESPONSE_KINDS)[number];
+
+/** Same guard rail as `assertNeverFormat`, one level down. */
+export function assertNeverGraphResponse(x: never): never {
+  throw new Error(`Unhandled graph response kind: ${JSON.stringify(x)}`);
+}
+
+/**
+ * Curves as coefficients rather than a discriminated union of shapes. A union
+ * here becomes `anyOf` in JSON Schema, which models follow far less reliably
+ * than one flat object — and the arity is checked in `structuralCheck` anyway.
+ */
+const PlotCurveSpecSchema = z.object({
+  kind: z.enum(["linear", "quadratic", "abs", "exp"]),
+  coeffs: z
+    .array(z.number())
+    .describe(
+      "linear: [m, b] for y=mx+b. quadratic: [a, b, c] for y=ax^2+bx+c. abs: [a, h, k] for y=a|x-h|+k. exp: [a, base] for y=a*base^x"
+    ),
+});
+
+const PlotSpecSchema = z.object({
+  x_min: z.number(),
+  x_max: z.number(),
+  y_min: z.number(),
+  y_max: z.number(),
+  curves: z.array(PlotCurveSpecSchema).describe("Curves to draw. May be empty for a bare grid"),
+  marks: z
+    .array(z.object({ x: z.number(), y: z.number(), label: z.string().nullable() }))
+    .describe("Points to draw on the plot. Never mark the point you are asking for"),
+  show_grid: z.boolean(),
+});
+
+const PointSchema = z.object({ x: z.number(), y: z.number() });
+
+/**
+ * All three graph interactions share one DB format and one stored shape;
+ * `response_kind` says which of the three answer fields is the live one, and
+ * `structuralCheck` enforces that exactly one is populated. Authoring uses the
+ * stricter per-kind schemas below, so a model is only ever shown the one field
+ * it is meant to fill.
+ */
+export const GraphProblemSchema = z.object({
+  ...baseFields,
+  format: z.literal("graph"),
+  plot: PlotSpecSchema,
+  response_kind: z.enum(GRAPH_RESPONSE_KINDS),
+  answer: OpenAnswerSchema.nullish(),
+  correct_points: z.array(PointSchema).nullish(),
+  target_curve: PlotCurveSpecSchema.nullish(),
+});
+
+const graphBase = {
+  ...baseFields,
+  format: z.literal("graph"),
+  plot: PlotSpecSchema,
+};
+
+/** Read the plot, type an answer. Graded by the existing open-answer ladder. */
+export const GraphValueProblemSchema = z.object({
+  ...graphBase,
+  response_kind: z.literal("value"),
+  answer: OpenAnswerSchema,
+});
+
+/** Read the plot, click the points being asked for. */
+export const GraphPointsProblemSchema = z.object({
+  ...graphBase,
+  response_kind: z.literal("points"),
+  correct_points: z
+    .array(PointSchema)
+    .describe("Every point that must be selected. Integer coordinates inside the window"),
+});
+
+/** Produce a curve by positioning it, rather than reading one. */
+export const GraphSketchProblemSchema = z.object({
+  ...graphBase,
+  response_kind: z.literal("sketch"),
+  target_curve: PlotCurveSpecSchema.describe(
+    "The curve the student must produce. Use kind linear or quadratic or abs — not exp"
+  ),
+});
+
 export const GeneratedProblemSchema = z.discriminatedUnion("format", [
   McqProblemSchema,
   OpenProblemSchema,
   FillBlankProblemSchema,
   MultiSelectProblemSchema,
   OrderingProblemSchema,
+  MatchingProblemSchema,
+  MultiPartProblemSchema,
+  GraphProblemSchema,
 ]);
 export type GeneratedProblem = z.infer<typeof GeneratedProblemSchema>;
+export type GraphProblem = z.infer<typeof GraphProblemSchema>;
 
 export const ProblemBatchSchema = z.object({
   problems: z.array(GeneratedProblemSchema),
@@ -172,19 +359,24 @@ export type ProblemBatch = z.infer<typeof ProblemBatchSchema>;
  * follow most reliably — and a per-format request also lets the prompt speak
  * only about the format at hand.
  */
-const PROBLEM_SCHEMA_BY_FORMAT = {
+const PROBLEM_SCHEMA_BY_KIND = {
   mcq: McqProblemSchema,
   open: OpenProblemSchema,
   fill_blank: FillBlankProblemSchema,
   multi_select: MultiSelectProblemSchema,
   ordering: OrderingProblemSchema,
-} as const satisfies Record<ProblemFormat, unknown>;
+  matching: MatchingProblemSchema,
+  multi_part: MultiPartProblemSchema,
+  graph_value: GraphValueProblemSchema,
+  graph_points: GraphPointsProblemSchema,
+  graph_sketch: GraphSketchProblemSchema,
+} as const satisfies Record<GenerationKind, unknown>;
 
-// Each per-format schema validates one arm of the union, so widening the
-// declared type to the union is sound — TS just can't prove it, because
-// ZodType is invariant in its output type.
-export function problemSchemaFor(format: ProblemFormat): z.ZodType<GeneratedProblem> {
-  return PROBLEM_SCHEMA_BY_FORMAT[format] as unknown as z.ZodType<GeneratedProblem>;
+// Each per-kind schema validates one arm of the union, so widening the declared
+// type to the union is sound — TS just can't prove it, because ZodType is
+// invariant in its output type.
+export function problemSchemaFor(kind: GenerationKind): z.ZodType<GeneratedProblem> {
+  return PROBLEM_SCHEMA_BY_KIND[kind] as unknown as z.ZodType<GeneratedProblem>;
 }
 
 /**
@@ -199,7 +391,7 @@ const topicIndex = z
 
 export type TaggedProblem = GeneratedProblem & { topic_index: number };
 
-const BATCH_SCHEMA_BY_FORMAT = {
+const BATCH_SCHEMA_BY_KIND = {
   mcq: z.object({ problems: z.array(McqProblemSchema.extend({ topic_index: topicIndex })) }),
   open: z.object({ problems: z.array(OpenProblemSchema.extend({ topic_index: topicIndex })) }),
   fill_blank: z.object({
@@ -211,31 +403,86 @@ const BATCH_SCHEMA_BY_FORMAT = {
   ordering: z.object({
     problems: z.array(OrderingProblemSchema.extend({ topic_index: topicIndex })),
   }),
-} as const satisfies Record<ProblemFormat, unknown>;
+  matching: z.object({
+    problems: z.array(MatchingProblemSchema.extend({ topic_index: topicIndex })),
+  }),
+  multi_part: z.object({
+    problems: z.array(MultiPartProblemSchema.extend({ topic_index: topicIndex })),
+  }),
+  graph_value: z.object({
+    problems: z.array(GraphValueProblemSchema.extend({ topic_index: topicIndex })),
+  }),
+  graph_points: z.object({
+    problems: z.array(GraphPointsProblemSchema.extend({ topic_index: topicIndex })),
+  }),
+  graph_sketch: z.object({
+    problems: z.array(GraphSketchProblemSchema.extend({ topic_index: topicIndex })),
+  }),
+} as const satisfies Record<GenerationKind, unknown>;
 
-export function batchSchemaFor(
-  format: ProblemFormat
-): z.ZodType<{ problems: TaggedProblem[] }> {
-  return BATCH_SCHEMA_BY_FORMAT[format] as unknown as z.ZodType<{
-    problems: TaggedProblem[];
-  }>;
+/**
+ * Stamp `format` and `response_kind` before validating.
+ *
+ * Both are properties of the *request*: one kind is asked for per call, so the
+ * values are known before the model answers and it has nothing to contribute.
+ * Gemini does not enforce `const`, so a model shown "graph_points" as the
+ * format writes exactly that into both fields — and an otherwise perfect
+ * problem then fails validation and is discarded. Deciding these here rather
+ * than trusting them makes that class of loss impossible.
+ */
+function stamped<T>(kind: GenerationKind, inner: z.ZodType<T>): z.ZodType<T> {
+  const format = formatForKind(kind);
+  const responseKind = kind.startsWith("graph_") ? kind.slice("graph_".length) : null;
+
+  const fix = (p: unknown) => {
+    if (!p || typeof p !== "object") return p;
+    const o = p as Record<string, unknown>;
+    o.format = format;
+    if (responseKind) o.response_kind = responseKind;
+    return o;
+  };
+
+  return z.preprocess((raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    const r = raw as Record<string, unknown>;
+    if (Array.isArray(r.problems)) r.problems = r.problems.map(fix);
+    if (r.fixed_problem) r.fixed_problem = fix(r.fixed_problem);
+    return r;
+  }, inner) as unknown as z.ZodType<T>;
 }
 
-const REPAIR_SCHEMA_BY_FORMAT = {
+export function batchSchemaFor(
+  kind: GenerationKind
+): z.ZodType<{ problems: TaggedProblem[] }> {
+  return stamped(
+    kind,
+    BATCH_SCHEMA_BY_KIND[kind] as unknown as z.ZodType<{ problems: TaggedProblem[] }>
+  );
+}
+
+const REPAIR_SCHEMA_BY_KIND = {
   mcq: z.object({ diagnosis: z.string(), fixed_problem: McqProblemSchema }),
   open: z.object({ diagnosis: z.string(), fixed_problem: OpenProblemSchema }),
   fill_blank: z.object({ diagnosis: z.string(), fixed_problem: FillBlankProblemSchema }),
   multi_select: z.object({ diagnosis: z.string(), fixed_problem: MultiSelectProblemSchema }),
   ordering: z.object({ diagnosis: z.string(), fixed_problem: OrderingProblemSchema }),
-} as const satisfies Record<ProblemFormat, unknown>;
+  matching: z.object({ diagnosis: z.string(), fixed_problem: MatchingProblemSchema }),
+  multi_part: z.object({ diagnosis: z.string(), fixed_problem: MultiPartProblemSchema }),
+  graph_value: z.object({ diagnosis: z.string(), fixed_problem: GraphValueProblemSchema }),
+  graph_points: z.object({ diagnosis: z.string(), fixed_problem: GraphPointsProblemSchema }),
+  graph_sketch: z.object({ diagnosis: z.string(), fixed_problem: GraphSketchProblemSchema }),
+} as const satisfies Record<GenerationKind, unknown>;
 
 export function repairSchemaFor(
-  format: ProblemFormat
+  kind: GenerationKind
 ): z.ZodType<{ diagnosis: string; fixed_problem: GeneratedProblem }> {
-  return REPAIR_SCHEMA_BY_FORMAT[format] as unknown as z.ZodType<{
-    diagnosis: string;
-    fixed_problem: GeneratedProblem;
-  }>;
+  return stamped(
+    kind,
+    REPAIR_SCHEMA_BY_KIND[kind] as unknown as z.ZodType<{
+      diagnosis: string;
+      fixed_problem: GeneratedProblem;
+    }>
+  );
 }
 
 /** Independent solver output for verification. */
@@ -258,6 +505,27 @@ export const SolverResultSchema = z.object({
     .array(z.string())
     .nullable()
     .describe("For ordering: the item letters in the order you would put them, else null"),
+  chosen_pairs: z
+    .array(z.object({ left_id: z.string(), right_id: z.string() }))
+    .nullable()
+    .describe("For matching: one entry per left item naming the right id you paired it with, else null"),
+  part_answers: z
+    .array(z.object({ label: z.string(), answer_latex: z.string() }))
+    .nullable()
+    .describe("For multi-part: your answer to each part, labelled, else null"),
+  chosen_points: z
+    .array(z.object({ x: z.number(), y: z.number() }))
+    .nullable()
+    .describe("For graph point-selection: every point you would select, else null"),
+  chosen_curve: z
+    .object({
+      kind: z.enum(["linear", "quadratic", "abs", "exp"]),
+      coeffs: z.array(z.number()),
+    })
+    .nullable()
+    .describe(
+      "For graph sketching: the curve you would draw, same coefficient convention as the problem, else null"
+    ),
   is_well_posed: z
     .boolean()
     .describe("False if the problem is ambiguous, unsolvable, or self-contradictory"),
@@ -336,8 +604,22 @@ export type SanitizedProblem = {
   blanks_count?: number;
   /** Ordering: the steps in the scrambled order the student sees them. */
   items?: { id: string; latex: string }[];
+  /** Matching: both columns are public; only the pairing is secret. */
+  left?: { id: string; latex: string }[];
+  right?: { id: string; latex: string }[];
+  /** Multi-part: the prompts only — each part's answer stays in the key. */
+  parts?: { label: string; prompt_latex: string }[];
+  /** Graph: the plot is the stimulus, so it travels with the statement. */
+  plot?: AuthoredPlot;
+  response_kind?: GraphResponseKind;
+  sketch_kind?: string;
   topic_title?: string;
 };
+
+/** The plot as authored, before `plotFromSpec` turns it into drawing input. */
+export type AuthoredPlot = z.infer<typeof PlotSpecSchema>;
+export type AuthoredCurve = z.infer<typeof PlotCurveSpecSchema>;
+export type PlotPoint = z.infer<typeof PointSchema>;
 
 /**
  * A `SanitizedProblem` with its math already rendered to HTML on the server.
@@ -355,6 +637,14 @@ export type PreparedProblem = {
   choices?: { id: string; html: string }[];
   blanks_count?: number;
   items?: { id: string; html: string }[];
+  left?: { id: string; html: string }[];
+  right?: { id: string; html: string }[];
+  parts?: { label: string; prompt_html: string }[];
+  /** Graph: SVG rendered in Node, plus the window the overlay needs. */
+  plot_svg?: string;
+  plot_window?: { xMin: number; xMax: number; yMin: number; yMax: number };
+  response_kind?: GraphResponseKind;
+  sketch_kind?: string;
   topic_title?: string;
 };
 
@@ -384,6 +674,15 @@ export type CheckResponse = {
     blanks?: { index: number; html: string }[];
     /** Ordering: the item ids in the correct sequence. */
     correct_order?: string[];
+    /** Matching: the correct pairing. */
+    correct_pairs?: { left_id: string; right_id: string }[];
+    /** Multi-part: the answer to each part, in order. */
+    part_answers?: { label: string; html: string }[];
+    /** Graph: the points that should have been selected. */
+    correct_points?: PlotPoint[];
+    /** Graph sketch: the target curve, and the plot showing it drawn. */
+    target_curve?: AuthoredCurve;
+    solution_plot_svg?: string;
   };
   explanation?: { steps: { math_html: string | null; note: string }[] };
   /**
@@ -414,6 +713,10 @@ export type ProblemAnswerRecord = {
   answer?: OpenAnswer;
   blanks?: { index: number; answer: OpenAnswer }[];
   correct_order?: string[];
+  correct_pairs?: { left_id: string; right_id: string }[];
+  parts?: { label: string; answer: OpenAnswer }[];
+  correct_points?: PlotPoint[];
+  target_curve?: AuthoredCurve;
   distractor_rationales?: { choice_id: string; misconception: string }[];
 };
 
@@ -424,6 +727,12 @@ export type ProblemContentRecord = {
   choices?: { id: string; latex: string }[];
   blanks_count?: number;
   items?: { id: string; latex: string }[];
+  left?: { id: string; latex: string }[];
+  right?: { id: string; latex: string }[];
+  parts?: { label: string; prompt_latex: string }[];
+  plot?: AuthoredPlot;
+  response_kind?: GraphResponseKind;
+  sketch_kind?: string;
 };
 
 export type ProblemExplanationRecord = {
@@ -464,6 +773,38 @@ export function splitProblem(p: GeneratedProblem): {
       // The scrambled order is public; the sequence that sorts it is the key.
       content.items = p.items;
       answer.correct_order = p.correct_order;
+      break;
+    case "matching":
+      // Both columns have to be shown to be answerable; the pairing is the key.
+      content.left = p.left;
+      content.right = p.right;
+      answer.correct_pairs = p.correct_pairs;
+      break;
+    case "multi_part":
+      // Prompts are public, answers are not — so the parts are split rather
+      // than stored whole, unlike every other format's option list.
+      content.parts = p.parts.map((part) => ({
+        label: part.label,
+        prompt_latex: part.prompt_latex,
+      }));
+      answer.parts = p.parts.map((part) => ({ label: part.label, answer: part.answer }));
+      break;
+    case "graph":
+      // The plot is the question, so it is public. Which points, or which
+      // curve, is the key — including for `sketch`, where handing over the
+      // target coefficients would draw the answer for the student.
+      content.plot = p.plot;
+      content.response_kind = p.response_kind;
+      if (p.response_kind === "value") answer.answer = p.answer ?? undefined;
+      else if (p.response_kind === "points")
+        answer.correct_points = p.correct_points ?? undefined;
+      else {
+        answer.target_curve = p.target_curve ?? undefined;
+        // Which family, but not where — the student is told they are drawing a
+        // parabola in the statement anyway, and they cannot be given handles
+        // without it. The coefficients stay in the key.
+        content.sketch_kind = p.target_curve?.kind;
+      }
       break;
     default:
       assertNeverFormat(p);

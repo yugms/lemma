@@ -1,5 +1,6 @@
 import katex from "katex";
 import type { PreparedProblem, SanitizedProblem } from "@/lib/ai/schemas";
+import { plotFromSpec, renderPlot } from "@/lib/plot";
 
 /**
  * Server-side math rendering.
@@ -95,5 +96,29 @@ export function prepareProblem(p: SanitizedProblem): PreparedProblem {
     // Ordering steps are prose-with-math, not bare expressions — a step reads
     // "divide both sides by \(3\)", so it needs renderProse, not renderMath.
     items: p.items?.map((i) => ({ id: i.id, html: renderProse(i.latex) })),
+    // Matching columns hold bare expressions on one side and often a phrase on
+    // the other ("the power rule"), so both go through renderProse.
+    left: p.left?.map((l) => ({ id: l.id, html: renderProse(l.latex) })),
+    right: p.right?.map((r) => ({ id: r.id, html: renderProse(r.latex) })),
+    parts: p.parts?.map((part) => ({
+      label: part.label,
+      prompt_html: renderProse(part.prompt_latex),
+    })),
+    // The plot is drawn here for the same reason the math is: so the browser
+    // needs neither KaTeX nor a charting library. The window travels alongside
+    // it because the interactive overlays need the transform, not the picture.
+    ...plotFields(p),
+  };
+}
+
+function plotFields(p: SanitizedProblem) {
+  if (!p.plot) return {};
+  const plot = plotFromSpec(p.plot);
+  if (!plot) return {};
+  return {
+    plot_svg: renderPlot(plot),
+    plot_window: plot.window,
+    response_kind: p.response_kind,
+    sketch_kind: p.sketch_kind,
   };
 }

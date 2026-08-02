@@ -66,14 +66,16 @@ export const FORMAT_LABELS: Record<ProblemFormat, string> = {
   fill_blank: "Fill in the blank",
   multi_select: "Select all that apply",
   ordering: "Order the steps",
+  matching: "Matching",
+  multi_part: "Multi-part",
+  graph: "Graph",
 };
 
 /**
  * Format labels for values that came out of the database rather than out of
- * `PROBLEM_FORMATS`. The `problems.format` enum has values the app doesn't
- * author (`graph`, `matching`, `multi_part`), and an unchecked lookup renders
- * `undefined` in the stats breakdown — or throws, where the result is
- * `.toLowerCase()`d.
+ * `PROBLEM_FORMATS`. The `problems.format` enum can hold a value this build
+ * doesn't author, and an unchecked lookup renders `undefined` in the stats
+ * breakdown — or throws, where the result is `.toLowerCase()`d.
  */
 export function formatLabel(key: string): string {
   return FORMAT_LABELS[key as ProblemFormat] ?? key.replace(/_/g, " ");

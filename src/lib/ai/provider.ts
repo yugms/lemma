@@ -123,12 +123,25 @@ function stripFence(text: string): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Base64 image data, as Gemini's `inlineData` wants it. */
+export type ImagePart = {
+  /** e.g. "image/jpeg", "image/png", "image/webp" */
+  mimeType: string;
+  /** Base64, without a data: URL prefix. */
+  data: string;
+};
+
 export type StructuredCall<T> = {
   /** Preference-ordered model chain; later entries are tried only on 429/503. */
   models: string[];
   system: string;
   prompt: string;
   schema: ZodType<T>;
+  /**
+   * Images the model should read alongside the prompt — photographed worksheets.
+   * Every model in both chains is multimodal, so no separate chain is needed.
+   */
+  images?: ImagePart[];
   maxOutputTokens?: number;
   thinking?: "low" | "medium";
   /** Total wall clock allowed across all retries and fallback models. */
@@ -148,6 +161,7 @@ export async function callStructured<T>({
   system,
   prompt,
   schema,
+  images,
   maxOutputTokens = 8000,
   thinking = "low",
   budgetMs = DEFAULT_BUDGET_MS,
@@ -156,6 +170,13 @@ export async function callStructured<T>({
   const deadline = Date.now() + budgetMs;
   let lastError: unknown;
 
+  // Images lead so the instruction that follows can refer back to them ("the
+  // pages above"). A bare string stays a bare string — the text-only callers
+  // are the hot path and their request shape must not shift.
+  const contents = images?.length
+    ? [...images.map((image) => ({ inlineData: image })), { text: prompt }]
+    : prompt;
+
   for (const model of models) {
     for (let attempt = 1; attempt <= ATTEMPTS_PER_MODEL; attempt++) {
       const remaining = deadline - Date.now();
@@ -163,7 +184,7 @@ export async function callStructured<T>({
       try {
         const response = await ai.models.generateContent({
           model,
-          contents: prompt,
+          contents,
           config: {
             systemInstruction: system,
             responseMimeType: "application/json",

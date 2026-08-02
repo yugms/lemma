@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { checkSubmission, wrongAnswerFeedback } from "@/lib/ai/check-answer";
 import { renderMath, renderProse } from "@/lib/math-render";
+import { curveFromAuthored, plotFromSpec, renderPlot } from "@/lib/plot";
 import { assertNeverFormat } from "@/lib/ai/schemas";
 import { ATTEMPT_MODES, MODE_RULES, retryEligible, shouldDisclose } from "@/lib/attempt-state";
 import type {
@@ -145,6 +146,40 @@ export async function POST(request: NextRequest) {
             html: renderMath(b.answer.value_latex),
           })),
         };
+      case "matching":
+        // Ids only — both columns are already on the client, so sending the
+        // pairing is enough to mark up what was right.
+        return { correct_pairs: answer.correct_pairs ?? [] };
+      case "multi_part":
+        return {
+          part_answers: (answer.parts ?? []).map((part) => ({
+            label: part.label,
+            html: renderMath(part.answer.value_latex),
+          })),
+        };
+      case "graph": {
+        if (content.response_kind === "points") {
+          return { correct_points: answer.correct_points ?? [] };
+        }
+        if (content.response_kind === "sketch") {
+          // The answer to "draw this" is a picture, so it is rendered as one —
+          // the coefficients alone would leave the student to plot the key by
+          // hand to find out what they should have produced.
+          const plot = content.plot ? plotFromSpec(content.plot) : null;
+          const target = answer.target_curve ? curveFromAuthored(answer.target_curve) : null;
+          return {
+            target_curve: answer.target_curve,
+            solution_plot_svg:
+              plot && target
+                ? renderPlot(
+                    { ...plot, curves: [...plot.curves, target] },
+                    { title: "The correct curve" }
+                  )
+                : undefined,
+          };
+        }
+        return { value_html: renderMath(answer.answer?.value_latex ?? "") };
+      }
       default:
         return assertNeverFormat(content.format);
     }

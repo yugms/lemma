@@ -52,13 +52,23 @@ Two budgets exist because delivering a short set beats delivering nothing: `buil
 - Models are preference-ordered chains (`GENERATOR_MODELS`, `CHECKER_MODELS`), env-overridable. Free-tier Flash models return 503 in bursts, so each role falls through to an older sibling. Retryability is classified by `isRetryable()`; only capacity errors fall through to the next model.
 - Gemini 3.x takes `thinkingLevel`, 2.5 takes `thinkingBudget` — `thinkingConfigFor()` sends only what a given model understands.
 
-**Gemini JSON Schema constraint:** `$ref` is only supported in non-required properties, so every schema must be fully inlined (`z.toJSONSchema(..., { reused: "inline" })`). A regression here fails at request time with an opaque 400, so `provider-schema.test.ts` asserts no `$ref`/`$defs`/`$schema` in any schema sent to a model. This is also why generation requests a single format at a time with a flat per-format schema (`batchSchemaFor`, `repairSchemaFor`) rather than the discriminated union.
+- Optional `images` turn the call multimodal (`contents` becomes a parts array). Every model in both chains already reads images, so worksheet scanning needs no separate chain. Nothing else may talk to the SDK, which is why image support lives here rather than in the scanning code.
+
+**Gemini JSON Schema constraint:** `$ref` is only supported in non-required properties, so every schema must be fully inlined (`z.toJSONSchema(..., { reused: "inline" })`). A regression here fails at request time with an opaque 400, so `provider-schema.test.ts` asserts no `$ref`/`$defs`/`$schema` in any schema sent to a model. This is also why generation requests one *generation kind* at a time with a flat schema (`batchSchemaFor`, `repairSchemaFor`) rather than the discriminated union.
+
+**Gemini does not enforce `const`.** `format` and `response_kind` are decided by *which schema was requested*, so `stamped()` in `schemas.ts` writes them in before validation rather than trusting the model. This is not defensive padding: shown "Format: graph_points", the model wrote that string into both literal fields, and a completely correct problem — right plot, right integer answer points — was discarded by zod. Anything fully determined by the request should be stamped, not asked for.
+
+### Generation kinds vs. DB formats
+
+`ProblemFormat` is the `problems.format` DB enum. `GenerationKind` is what one authoring call asks for, and the two differ in exactly one place: `graph` is three unrelated tasks (`graph_value`, `graph_points`, `graph_sketch`) sharing a format. `kindsForFormat()` expands a request, `formatForKind()` collapses it back, and `kindOf()` recovers the kind from an authored problem so it can be repaired with the schema that produced it. `splitAcrossKinds()` divides *after* expanding, so asking for six graph problems yields two of each rather than six of one.
 
 ### `src/lib/ai/schemas.ts` is the single source of truth
 
 One set of zod schemas defines model structured outputs, the `problems` jsonb column shapes, and UI types. `splitProblem()` is the security boundary: it partitions an authored problem into `content` (statement, choices, hint — safe-ish), `answer` (correct choice, canonical answers, distractor rationales — secret), and `explanation` (worked steps — secret until an attempt). `SanitizedProblem` is what the client is ever allowed to see.
 
 `TaggedProblem` adds `topic_index` because a mis-attributed problem gets served forever to students studying the wrong topic; a bogus index is clamped, not discarded.
+
+`assertNeverFormat()` is the guide rail for adding a format: every format-dependent branch ends in it, so a new entry in `PROBLEM_FORMATS` turns each unhandled site into a compile error rather than a silent wrong answer. `assertNeverGraphResponse()` does the same one level down. Adding a format is therefore "add it, then fix what the compiler lists" — plus a fixture in `formats.test.ts`, which is keyed off `PROBLEM_FORMATS` so a format without one fails the suite.
 
 ### Verification and grading are separate ladders
 
@@ -79,6 +89,16 @@ One set of zod schemas defines model structured outputs, the `problems` jsonb co
 Auth is anonymous-by-default: `ensureUser()` calls `signInAnonymously()`, and Google sign-in uses `linkIdentity()` for anonymous users so the user id — and therefore all history — survives the upgrade. Daily set caps live in `buildProblemSet` (5 guest / 20 signed-in). A guest's identity lives only in their session cookie, so clearing it orphans their sets permanently — don't clear cookies to test the signed-out state; fetch with `credentials: "omit"` instead.
 
 Server Actions (`src/app/sets/actions.ts`) use the RLS-scoped server client deliberately: the `delete own sets` policy *is* the authorization check, so a forged id matches no rows. At the DB level `problem_set_items.set_id` cascades, but `attempts.set_id` is `ON DELETE SET NULL` — practice history outlives the set it was earned in, which is why deleting a set can't fail on a foreign key.
+
+### Worksheet scanning
+
+`src/app/set/[id]/scan` → the browser uploads photos straight into the private `worksheet-scans` bucket under `${userId}/...` (which is what the storage policies key on, and keeps megabytes of photo out of the serverless request body), then `POST /api/scan` marks them.
+
+`grade-scan.ts` asks the model for two separable things and the schema keeps them apart: *transcribing* the handwriting and *judging* the maths. `confidence` scores the transcription only. Anything below `SCAN_CONFIDENCE_THRESHOLD` is withheld from `attempts` and returned as `needs_confirmation` for the student to confirm — a confident misread would otherwise become permanent wrong history, which is the one failure mode that makes scanning worse than not having it.
+
+Scanned marks are written as `attempts` rows with `mode: "scan"` (`scored`, no retry — the paper is already written), so they feed Review, Stats and the coach like typed practice. Rows are inserted one at a time because `attempts_one_per_attempt` makes duplicates *expected* — the student may have typed some problems already — and a batch insert would lose every mark to one collision. A conflict skips that problem and leaves the earlier outcome standing.
+
+`worksheet_uploads` has INSERT/SELECT policies but no UPDATE, which is correct: `status` and `grading` are written by the service client after marking, and a client that could write them could mark its own work.
 
 ### Templates
 
@@ -101,6 +121,8 @@ Server Actions (`src/app/sets/actions.ts`) use the RLS-scoped server client deli
 ### Two invariants keep the client bundle small
 
 Both are easy to undo by accident and neither fails loudly.
+
+0. **Plots are drawn in Node too.** `src/lib/plot.ts` renders a declarative spec (window, curves, marks, grid) to an SVG string; `prepareProblem()` calls it and ships `plot_svg`. Same reasoning as KaTeX — the plot is a fixed stimulus that never animates or re-fits, so it does not justify a charting library in the client bundle. Colours are CSS custom properties, so plots follow the theme without the module knowing which one is active. The geometry half (`plotGeometry`, `curveFromHandles`) is pure arithmetic and *is* imported by the interactive overlays, so the axes and the click targets agree by construction rather than by two copies of the same transform.
 
 1. **KaTeX never reaches the browser.** `src/lib/math-render.ts` (`renderMath`, `renderProse`, `prepareProblem`) runs KaTeX in Node; `src/components/latex.tsx` only injects the resulting HTML and must not import `katex`. Server Components and `/api/check` pre-render every expression — which is why `CheckResponse` carries `*_html` fields rather than LaTeX. Importing `katex` from a Client Component silently adds ~275 kB. `renderProse` escapes its text segments, since it builds a string where React used to escape for us.
 2. **The Supabase browser SDK is lazily imported.** Auth is resolved server-side by `getCurrentUser()` in `src/lib/auth-server.ts` (wrapped in React `cache`, so the root layout and the page share one round-trip) and handed to `AuthButton` as a plain prop. `@/lib/auth` is `await import(...)`-ed at the point of a click or a submit. A top-level import from any client component puts ~64 kB gzipped back on every route.

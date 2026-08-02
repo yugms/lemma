@@ -27,6 +27,9 @@ const FORMAT_HINTS: Record<ProblemFormat, string> = {
   open: "Type the answer yourself",
   fill_blank: "Complete the missing pieces",
   multi_select: "More than one can be right",
+  matching: "Pair each one with its match",
+  multi_part: "Several parts that build up",
+  graph: "Read, mark up or draw a plot",
   ordering: "Arrange the steps of a method",
 };
 

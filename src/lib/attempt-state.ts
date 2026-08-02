@@ -11,13 +11,14 @@
 
 export type AttemptRecord = { is_correct: boolean | null };
 
-export const ATTEMPT_MODES = ["practice", "flashcard", "quiz"] as const;
+export const ATTEMPT_MODES = ["practice", "flashcard", "quiz", "scan"] as const;
 export type AttemptMode = (typeof ATTEMPT_MODES)[number];
 
 export const MODE_LABELS: Record<AttemptMode, string> = {
   practice: "Practice",
   quiz: "Quizzes",
   flashcard: "Flashcards",
+  scan: "Scanned work",
 };
 
 /**
@@ -40,6 +41,11 @@ export const MODE_RULES: Record<
   practice: { scored: true, discloses: true, offersRetry: true },
   quiz: { scored: true, discloses: false, offersRetry: false },
   flashcard: { scored: false, discloses: true, offersRetry: false },
+  // Work done on paper and photographed. Scored, because it is a record of
+  // working through the set once — the same thing practice records. No retry:
+  // the paper is already written, and a second attempt at it would be typed,
+  // which is a different exercise from the one being marked.
+  scan: { scored: true, discloses: true, offersRetry: false },
 };
 
 export function retryEligible(

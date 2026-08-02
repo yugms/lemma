@@ -139,7 +139,231 @@ const FIXTURES: Record<ProblemFormat, { problem: GeneratedProblem; right: unknow
     right: ["A", "B", "C"],
     wrong: ["B", "A", "C"],
   },
+
+  matching: {
+    problem: {
+      format: "matching",
+      style: "conceptual",
+      difficulty: 3,
+      statement_latex: "Match each function to its derivative.",
+      hint: null,
+      explanation_steps: steps,
+      left: [
+        { id: "A", latex: "x^2" },
+        { id: "B", latex: "\\sin x" },
+        { id: "C", latex: "e^x" },
+      ],
+      // One more right entry than left, so the last pair isn't free.
+      right: [
+        { id: "1", latex: "2x" },
+        { id: "2", latex: "\\cos x" },
+        { id: "3", latex: "e^x" },
+        { id: "4", latex: "-\\sin x" },
+      ],
+      correct_pairs: [
+        { left_id: "A", right_id: "1" },
+        { left_id: "B", right_id: "2" },
+        { left_id: "C", right_id: "3" },
+      ],
+    },
+    right: { A: "1", B: "2", C: "3" },
+    wrong: { A: "1", B: "4", C: "3" },
+  },
+
+  multi_part: {
+    problem: {
+      format: "multi_part",
+      style: "word",
+      difficulty: 3,
+      statement_latex: "A rectangle has width \\(3\\) and height \\(4\\).",
+      hint: null,
+      explanation_steps: steps,
+      parts: [
+        {
+          label: "a",
+          prompt_latex: "What is its area?",
+          answer: {
+            value_latex: "12",
+            kind: "numeric",
+            numeric_value: 12,
+            tolerance: null,
+            acceptable_forms: [],
+            multi_valued: false,
+          },
+        },
+        {
+          label: "b",
+          prompt_latex: "What is its perimeter?",
+          answer: {
+            value_latex: "14",
+            kind: "numeric",
+            numeric_value: 14,
+            tolerance: null,
+            acceptable_forms: [],
+            multi_valued: false,
+          },
+        },
+      ],
+    },
+    right: { a: "12", b: "14" },
+    // One part right, one wrong — grading is all-or-nothing, so this must fail.
+    wrong: { a: "12", b: "13" },
+  },
+
+  // The `graph` DB format covers three different tasks. This slot holds the
+  // point-selection one; GRAPH_KINDS below runs all three through the same
+  // round trip, so none of them can be added without a fixture.
+  graph: {
+    problem: {
+      format: "graph",
+      style: "conceptual",
+      difficulty: 3,
+      statement_latex: "Select both \\(x\\)-intercepts of the parabola.",
+      hint: null,
+      explanation_steps: steps,
+      plot: {
+        x_min: -5,
+        x_max: 5,
+        y_min: -5,
+        y_max: 5,
+        curves: [{ kind: "quadratic", coeffs: [1, 0, -4] }],
+        marks: [],
+        show_grid: true,
+      },
+      response_kind: "points",
+      correct_points: [
+        { x: -2, y: 0 },
+        { x: 2, y: 0 },
+      ],
+    },
+    // Order must not matter — the student clicks them in whatever order.
+    right: [
+      { x: 2, y: 0 },
+      { x: -2, y: 0 },
+    ],
+    wrong: [{ x: 2, y: 0 }],
+  },
 };
+
+/** The three graph tasks, each of which has to survive the round trip too. */
+const GRAPH_KINDS: { name: string; problem: GeneratedProblem; right: unknown; wrong: unknown }[] = [
+  {
+    name: "graph/points",
+    problem: FIXTURES.graph.problem,
+    right: FIXTURES.graph.right,
+    wrong: FIXTURES.graph.wrong,
+  },
+  {
+    name: "graph/value",
+    problem: {
+      format: "graph",
+      style: "conceptual",
+      difficulty: 2,
+      statement_latex: "What is the slope of the line shown?",
+      hint: null,
+      explanation_steps: steps,
+      plot: {
+        x_min: -5,
+        x_max: 5,
+        y_min: -5,
+        y_max: 5,
+        curves: [{ kind: "linear", coeffs: [2, 1] }],
+        marks: [],
+        show_grid: true,
+      },
+      response_kind: "value",
+      answer: {
+        value_latex: "2",
+        kind: "numeric",
+        numeric_value: 2,
+        tolerance: null,
+        acceptable_forms: [],
+        multi_valued: false,
+      },
+    },
+    right: "2",
+    wrong: "5",
+  },
+  {
+    name: "graph/sketch",
+    problem: {
+      format: "graph",
+      style: "drill",
+      difficulty: 2,
+      statement_latex: "Sketch the line \\(y = 2x + 1\\).",
+      hint: null,
+      explanation_steps: steps,
+      plot: {
+        x_min: -5,
+        x_max: 5,
+        y_min: -5,
+        y_max: 5,
+        curves: [],
+        marks: [],
+        show_grid: true,
+      },
+      response_kind: "sketch",
+      target_curve: { kind: "linear", coeffs: [2, 1] },
+    },
+    right: { kind: "linear", coeffs: [2, 1] },
+    wrong: { kind: "linear", coeffs: [2, -1] },
+  },
+];
+
+describe("every graph response kind survives the round trip", () => {
+  for (const { name, problem, right, wrong } of GRAPH_KINDS) {
+    describe(name, () => {
+      it("passes its own structural check", () => {
+        const check = structuralCheck(problem);
+        expect(check.ok, check.reason).toBe(true);
+      });
+
+      it("grades a right and a wrong submission", async () => {
+        const { content, answer } = splitProblem(problem);
+        await expect(checkSubmission(content, answer, right)).resolves.toMatchObject({
+          correct: true,
+        });
+        await expect(checkSubmission(content, answer, wrong)).resolves.toMatchObject({
+          correct: false,
+        });
+      });
+
+      it("grades an empty submission as wrong rather than throwing", async () => {
+        const { content, answer } = splitProblem(problem);
+        await expect(checkSubmission(content, answer, undefined)).resolves.toMatchObject({
+          correct: false,
+        });
+      });
+
+      it("keeps the answer key out of content", () => {
+        const { content } = splitProblem(problem);
+        const serialized = JSON.stringify(content);
+        for (const secret of ["correct_points", "target_curve", "value_latex"]) {
+          expect(serialized.includes(secret), `${secret} leaked into content`).toBe(false);
+        }
+      });
+
+      it("renders its plot to SVG on the server", () => {
+        const { content } = splitProblem(problem);
+        const prepared = prepareProblem({
+          id: "p1",
+          position: 1,
+          style: problem.style,
+          format: "graph",
+          difficulty: problem.difficulty,
+          statement_latex: content.statement_latex,
+          hint: content.hint,
+          plot: content.plot,
+          response_kind: content.response_kind,
+          sketch_kind: content.sketch_kind,
+        });
+        // The browser gets markup, never a plotting library or a raw spec.
+        expect(prepared.plot_svg?.startsWith("<svg")).toBe(true);
+        expect(prepared.plot_window).toBeDefined();
+      });
+    });
+  }
+});
 
 describe("every format survives the round trip", () => {
   it("has a fixture for each declared format", () => {
@@ -168,7 +392,11 @@ describe("every format survives the round trip", () => {
           "correct_choice_id",
           "correct_choice_ids",
           "correct_order",
+          "correct_pairs",
           "distractor_rationales",
+          // multi_part splits its parts apart: the prompts are public, the
+          // per-part OpenAnswer is not, so `value_latex` must not survive.
+          "value_latex",
         ]) {
           expect(serialized.includes(secret), `${secret} leaked into content`).toBe(false);
         }
@@ -207,6 +435,9 @@ describe("every format survives the round trip", () => {
           choices: content.choices,
           blanks_count: content.blanks_count,
           items: content.items,
+          left: content.left,
+          right: content.right,
+          parts: content.parts,
         });
         expect(prepared.statement_html.length).toBeGreaterThan(0);
         // Whatever the client needs to display has to arrive as HTML — it
@@ -218,6 +449,19 @@ describe("every format survives the round trip", () => {
         if (content.items) {
           expect(prepared.items?.length).toBe(content.items.length);
           for (const i of prepared.items ?? []) expect(i.html.length).toBeGreaterThan(0);
+        }
+        for (const column of [
+          [content.left, prepared.left],
+          [content.right, prepared.right],
+        ] as const) {
+          const [raw, rendered] = column;
+          if (!raw) continue;
+          expect(rendered?.length).toBe(raw.length);
+          for (const entry of rendered ?? []) expect(entry.html.length).toBeGreaterThan(0);
+        }
+        if (content.parts) {
+          expect(prepared.parts?.length).toBe(content.parts.length);
+          for (const p of prepared.parts ?? []) expect(p.prompt_html.length).toBeGreaterThan(0);
         }
       });
     });
@@ -295,6 +539,48 @@ describe("structural check rejects broken problems", () => {
       correct_order: string[];
     };
     p.correct_order = ["A", "B"];
+    expect(structuralCheck(p).ok).toBe(false);
+  });
+
+  it("rejects a matching with no unmatched extra", () => {
+    // Equal columns hand the final pair over by elimination, so a student who
+    // knows n-1 pairings scores n.
+    const p = structuredClone(FIXTURES.matching.problem) as GeneratedProblem & {
+      right: { id: string }[];
+    };
+    p.right = p.right.slice(0, 3);
+    expect(structuralCheck(p).ok).toBe(false);
+  });
+
+  it("rejects a matching that reuses one right item for two pairs", () => {
+    const p = structuredClone(FIXTURES.matching.problem) as GeneratedProblem & {
+      correct_pairs: { left_id: string; right_id: string }[];
+    };
+    p.correct_pairs[1].right_id = p.correct_pairs[0].right_id;
+    expect(structuralCheck(p).ok).toBe(false);
+  });
+
+  it("rejects a matching that leaves a left item unpaired", () => {
+    const p = structuredClone(FIXTURES.matching.problem) as GeneratedProblem & {
+      correct_pairs: unknown[];
+    };
+    p.correct_pairs.pop();
+    expect(structuralCheck(p).ok).toBe(false);
+  });
+
+  it("rejects a multi-part with only one part", () => {
+    const p = structuredClone(FIXTURES.multi_part.problem) as GeneratedProblem & {
+      parts: unknown[];
+    };
+    p.parts = p.parts.slice(0, 1);
+    expect(structuralCheck(p).ok).toBe(false);
+  });
+
+  it("rejects a multi-part with duplicate part labels", () => {
+    const p = structuredClone(FIXTURES.multi_part.problem) as GeneratedProblem & {
+      parts: { label: string }[];
+    };
+    p.parts[1].label = p.parts[0].label;
     expect(structuralCheck(p).ok).toBe(false);
   });
 });
