@@ -100,6 +100,16 @@ Scanned marks are written as `attempts` rows with `mode: "scan"` (`scored`, no r
 
 `worksheet_uploads` has INSERT/SELECT policies but no UPDATE, which is correct: `status` and `grading` are written by the service client after marking, and a client that could write them could mark its own work.
 
+### Deleting your own data
+
+`src/lib/account.ts` backs `/account` with three levels: clear practice history (keeps the sets, which cost model calls and a daily slot to generate), delete all data (keeps the account), and delete the account.
+
+Two ordering facts make it work. Every user-owned table is `ON DELETE CASCADE` from `auth.users`, so `auth.admin.deleteUser()` takes the Postgres rows with it — but **storage has no such link**, so scans are swept first; after the cascade, the `worksheet_uploads` rows naming those files are gone and the objects can never be found again. Supabase also refuses `delete from storage.objects` outright ("use the Storage API"), so the sweep lists the bucket rather than trusting the upload rows, which is what catches files whose row was already removed.
+
+Deletes use the service client with a `userId` resolved server-side, never one passed in — `attempts`, `study_sessions` and `coach_reads` are read-only under RLS, so an RLS-scoped delete would match no rows and report success. `loadAccountSummary` throws rather than falling back to zero: those counts are the last thing read before a permanent deletion, and "0" is the one wrong answer that changes the decision.
+
+`live-account.test.ts` exercises all three against throwaway users it creates and deletes; it self-skips without `SUPABASE_SECRET_KEY`.
+
 ### Templates
 
 `src/lib/templates/` holds deterministic parametrized generators: seeded RNG in, a full `GeneratedProblem` (statement, computed answer, authored explanation) out, so they are free and skip AI verification entirely (`verification: { method: "computed" }`). To add one, implement `Template` and register it in the `templates` array in `index.ts`. `topicSlugs` must match `topics.slug` values in the DB catalog — a typo silently disables the template. Templates only serve the `drill` style. `core.test.ts` structurally validates every template across seeds, difficulties, and formats.

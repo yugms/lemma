@@ -41,9 +41,16 @@ export function AuthButton({
   if (user && !user.isGuest) {
     return (
       <div className="flex items-center gap-2">
-        <span className="hidden max-w-36 truncate text-sm text-muted sm:block">
+        {/* The name is the way into account settings — the convention
+            everywhere else, and the only entry point that doesn't cost a
+            nav slot in a header this narrow. */}
+        <Link
+          href="/account"
+          transitionTypes={["nav-lateral"]}
+          className="hidden max-w-36 truncate text-sm text-muted transition-colors hover:text-fg sm:block"
+        >
           {user.name}
-        </span>
+        </Link>
         <button
           type="button"
           onClick={handleSignOut}
@@ -64,7 +71,16 @@ export function AuthButton({
 
   return (
     <div className="flex items-center gap-2.5">
-      {user?.isGuest && <span className="badge hidden sm:inline-flex">Guest</span>}
+      {/* A guest has data worth managing too, so the badge is their way in. */}
+      {user?.isGuest && (
+        <Link
+          href="/account"
+          transitionTypes={["nav-lateral"]}
+          className="badge hidden transition-colors hover:border-line-strong hover:text-fg sm:inline-flex"
+        >
+          Guest
+        </Link>
+      )}
       <Link
         href={next && next !== "/" ? `/signin?next=${encodeURIComponent(next)}` : "/signin"}
         transitionTypes={["nav-lateral"]}
