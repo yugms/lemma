@@ -16,6 +16,7 @@ import {
   recordScanAttempts,
   type WorksheetGrading,
 } from "@/lib/worksheets";
+import { scanAllowance } from "@/lib/limits";
 import type { ProblemAnswerRecord, ProblemContentRecord } from "@/lib/ai/schemas";
 
 export const runtime = "nodejs";
@@ -101,6 +102,14 @@ export async function POST(request: NextRequest) {
 
   if (problems.length === 0) {
     return Response.json({ error: "That set has no problems." }, { status: 400 });
+  }
+
+  // Checked here rather than before the ownership work above, so a caller
+  // probing someone else's set still gets 404 rather than learning their own
+  // quota state from it.
+  const allowance = await scanAllowance(user.id, user.is_anonymous ?? false);
+  if (!allowance.ok) {
+    return Response.json({ error: allowance.message }, { status: 429 });
   }
 
   const uploadId = await createUpload(user.id, body.setId, body.paths);

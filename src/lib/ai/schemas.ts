@@ -357,27 +357,10 @@ export type ProblemBatch = z.infer<typeof ProblemBatchSchema>;
  * Generation asks for one format at a time. A discriminated union survives the
  * round-trip through JSON Schema, but a flat single-shape schema is what models
  * follow most reliably — and a per-format request also lets the prompt speak
- * only about the format at hand.
+ * only about the format at hand. The batch and repair maps below hold that
+ * per-kind mapping; both carry the same `satisfies Record<GenerationKind, …>`
+ * guard, so a new kind without a schema is still a compile error.
  */
-const PROBLEM_SCHEMA_BY_KIND = {
-  mcq: McqProblemSchema,
-  open: OpenProblemSchema,
-  fill_blank: FillBlankProblemSchema,
-  multi_select: MultiSelectProblemSchema,
-  ordering: OrderingProblemSchema,
-  matching: MatchingProblemSchema,
-  multi_part: MultiPartProblemSchema,
-  graph_value: GraphValueProblemSchema,
-  graph_points: GraphPointsProblemSchema,
-  graph_sketch: GraphSketchProblemSchema,
-} as const satisfies Record<GenerationKind, unknown>;
-
-// Each per-kind schema validates one arm of the union, so widening the declared
-// type to the union is sound — TS just can't prove it, because ZodType is
-// invariant in its output type.
-export function problemSchemaFor(kind: GenerationKind): z.ZodType<GeneratedProblem> {
-  return PROBLEM_SCHEMA_BY_KIND[kind] as unknown as z.ZodType<GeneratedProblem>;
-}
 
 /**
  * Generated problems carry the topic they were written for. Without this the

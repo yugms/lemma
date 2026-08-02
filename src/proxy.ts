@@ -1,33 +1,51 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { supabasePublishableKey, supabaseUrl } from "@/lib/env";
+import { contentSecurityPolicy, newNonce } from "@/lib/csp";
 
 export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  const nonce = newNonce();
+  const csp = contentSecurityPolicy({
+    nonce,
+    supabaseOrigin: new URL(supabaseUrl()).origin,
+    isDev: process.env.NODE_ENV === "development",
+  });
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
+  /**
+   * The nonce has to travel on the *request*, not just the response: Next
+   * parses the request's CSP header during render and stamps the nonce onto
+   * every script it emits. Rebuilt on each call rather than captured once,
+   * because `request.cookies.set` below writes through to `request.headers`,
+   * and a stale copy would drop the refreshed session cookie.
+   */
+  const forwardedHeaders = () => {
+    const headers = new Headers(request.headers);
+    headers.set("x-nonce", nonce);
+    headers.set("Content-Security-Policy", csp);
+    return headers;
+  };
+
+  let response = NextResponse.next({ request: { headers: forwardedHeaders() } });
+
+  const supabase = createServerClient(supabaseUrl(), supabasePublishableKey(), {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
       },
-    }
-  );
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+        response = NextResponse.next({ request: { headers: forwardedHeaders() } });
+        cookiesToSet.forEach(({ name, value, options }) =>
+          response.cookies.set(name, value, options)
+        );
+      },
+    },
+  });
 
   // Refresh the session if expired — required for Server Components.
   await supabase.auth.getUser();
 
+  response.headers.set("Content-Security-Policy", csp);
   return response;
 }
 

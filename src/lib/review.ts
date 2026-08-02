@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import { capFor, startOfToday } from "@/lib/limits";
 import { newShareCode } from "@/lib/share-code";
 import type { ProblemFormat } from "@/lib/ai/schemas";
 import type { SetConfig } from "@/lib/sets";
@@ -20,9 +21,9 @@ export const REVIEW_SET_MAX = 12;
 /**
  * Review sets are cheap but not free — each one is two writes and a row in the
  * library. This bounds repeat clicks; it is deliberately separate from the
- * generation cap, which exists to bound model spend.
+ * generation cap, which exists to bound model spend. The number itself lives in
+ * `limits.ts` with every other daily bound.
  */
-const REVIEW_SETS_PER_DAY = 10;
 
 export type MissedProblem = {
   problemId: string;
@@ -243,16 +244,15 @@ export async function createReviewSet(
 
   const db = createServiceClient();
 
-  const since = new Date();
-  since.setHours(0, 0, 0, 0);
   const { count: todayCount } = await db
     .from("problem_sets")
     .select("id", { count: "exact", head: true })
     .eq("owner_id", userId)
     .not("config->>review", "is", null)
-    .gte("created_at", since.toISOString());
-  if ((todayCount ?? 0) >= REVIEW_SETS_PER_DAY) {
-    return { error: `That's ${REVIEW_SETS_PER_DAY} review sets today — practise one of them first.` };
+    .gte("created_at", startOfToday().toISOString());
+  const reviewCap = capFor("reviewSets", false);
+  if ((todayCount ?? 0) >= reviewCap) {
+    return { error: `That's ${reviewCap} review sets today — practise one of them first.` };
   }
 
   // Re-derive entitlement rather than trusting the ids: this is the only place

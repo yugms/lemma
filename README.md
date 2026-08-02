@@ -28,9 +28,11 @@ It runs on Google AI Studio's free tier, so the whole thing costs $0 to operate.
 
 ## Features
 
-- **Sets built to order** — 9 courses, 47 units, 103 topics (Foundations through AP Calculus BC and competition math), 5 difficulty levels, 5 problem styles (drill, word, conceptual, proof, error analysis) and 5 formats (multiple choice, open answer, fill-in-the-blank, select-all, order-the-steps). Up to 15 problems a set.
+- **Sets built to order** — 9 courses, 47 units, 103 topics (Foundations through AP Calculus BC and competition math), 5 difficulty levels, 5 problem styles (drill, word, conceptual, proof, error analysis) and 8 formats (multiple choice, open answer, fill-in-the-blank, select-all, order-the-steps, matching, multi-part, and graph). Up to 15 problems a set.
 - **Verified, not just generated** — each problem is structurally validated, then solved from the statement alone by a checker model that never sees the stored answer. Disagreement earns one repair pass, then a discard.
-- **Three ways to work a set** — practice (graded, one retry, solutions on demand), quiz (nothing disclosed until you hand it in), and flashcards (unscored, infinitely repeatable).
+- **Graphs you interact with, three ways** — read a value off a plot, click the lattice points that satisfy a condition, or drag handles to produce a curve. One DB format, three tasks. Plots render to SVG in Node, so no charting library reaches the browser.
+- **Four ways to work a set** — practice (graded, one retry, solutions on demand), quiz (nothing disclosed until you hand it in), flashcards (unscored, infinitely repeatable), and paper.
+- **Print it, do it on paper, scan it back** — print a worksheet with optional answer key, work it by hand, then photograph it. A vision model transcribes and marks it into the same record as typed practice, behind a confidence gate so a misread never becomes permanent history.
 - **Grading that understands math** — `3/4`, `0.75` and `\frac{3}{4}` are the same answer. A local normalizer settles almost everything; only genuinely ambiguous cases cost a model call. Wrong answers get a diagnosis of the specific slip, not "incorrect".
 - **A practice record you can't fake** — every score, meter and stat is reconstructed from `attempts` rows written server-side. There is no progress column to forge.
 - **Review queue** — the problems you actually missed, ranked worst-first, rebuilt into a fresh set for free.
@@ -38,6 +40,7 @@ It runs on Google AI Studio's free tier, so the whole thing costs $0 to operate.
 - **Study sessions and sharing** — scope stats to a single sitting, or hand a set to someone else with a share link (which grants a *copy*, never access to your record).
 - **Instant, free drills** — 16 deterministic templates with computed answers and authored explanations skip the model entirely.
 - **Guest-first** — anonymous sign-in by default; linking Google keeps the same user id, so nothing you've done is lost on upgrade.
+- **Your data, removable** — `/account` clears practice history, deletes everything but the account, or deletes the account outright. All three are immediate, and storage is swept before the database cascade so no orphaned files survive.
 
 ## How it works
 
@@ -78,6 +81,23 @@ Each mode is defined by three answers, which the grading route reads from one ta
 | Practice | yes | yes | on a wrong answer |
 | Quiz | yes | only after hand-in | no |
 | Flashcards | no (unscoped reps) | yes | n/a — repeat freely |
+| Scanned work | yes | yes | no — the paper is already written |
+
+### Daily limits
+
+Everything runs on one shared free model quota, so each account is bounded per day. The numbers live in `src/lib/limits.ts` and the `/terms` page renders them from that same table, so the published figures can't drift from the enforced ones.
+
+| | Guest | Signed in |
+|---|---|---|
+| Generated sets (only those costing a model call) | 5 | 20 |
+| Worksheet scans | 5 | 20 |
+| Review sets · shared-set copies | 10 · 10 | 10 · 10 |
+| Model-assisted marking | 60 | 200 |
+
+Over the marking budget your answer is still graded — locally — and only the written diagnosis is withheld. That is the same degradation that already happens when the provider is unreachable, which is why it is safe to reach deliberately.
+
+> [!NOTE]
+> Anonymous sessions are issued by Supabase straight to the browser, so nothing in this codebase sees them. Per-user caps bound casual overuse; the defence against farming fresh guest accounts is Supabase's own auth rate limiting, which is a dashboard setting.
 
 ## Getting started
 
@@ -99,8 +119,16 @@ npm run dev
 
 ### Configure Supabase
 
-1. **Authentication → Sign In / Providers → enable "Anonymous sign-ins"**. This is required — guest mode is the default path through the app.
-2. Optionally configure the **Google** provider (client ID/secret from Google Cloud Console) to allow sign-in.
+Three settings, none of which live in this repo, and all three are needed for sign-in to work:
+
+1. **Authentication → Sign In / Providers → "Anonymous sign-ins"**. Required — guest mode is the default path through the app.
+2. **Authentication → Sign In / Providers → "Allow manual linking"**. Also required, and **off by default**. `linkIdentity()` is what upgrades a guest to a Google account without changing their user id; without this every guest sign-in fails with `404 manual_linking_disabled`.
+3. **The Google provider**, with a client ID and secret from Google Cloud Console. The OAuth client's redirect URI must point at `https://<project>.supabase.co/auth/v1/callback` — Supabase, *not* your app. With the provider off you get `400 validation_failed / "provider is not enabled"`.
+
+Then add your deployed origin under **Authentication → URL Configuration** (Site URL and Redirect URLs), since sign-in derives its redirect from `window.location.origin`.
+
+> [!TIP]
+> None of this is visible from the code, so when sign-in fails, read `error_code` in the Supabase auth logs first. `src/lib/auth-errors.ts` maps those codes to the copy shown on `/signin`, and the callback forwards the real code rather than a generic flag precisely so the page can name the cause.
 
 > [!IMPORTANT]
 > There is no local database and no SQL in this repo. The schema lives in the Supabase project's migration history (`catalog`, `problems`, `sets_attempts_uploads`, `rls_and_storage`, `seed_catalog`, `bump_times_served_fn`, `lock_down_bump_times_served`, `harden_rls_client_read_only`, `study_sessions_and_coach_reads`, `add_problem_formats`, `attempt_retries`, `catalog_foundations_geometry_stats`). Inspect and change it through the Supabase MCP server configured in `.mcp.json`.
@@ -113,7 +141,7 @@ npm run dev
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes | Same page. The current key format — the legacy `anon` JWT is deprecated |
 | `SUPABASE_SECRET_KEY` | yes | "Secret keys" → create one. **Server-only, bypasses RLS** |
 | `GEMINI_API_KEY` | yes | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| `NEXT_PUBLIC_SITE_URL` | no | Defaults to `https://lemma.app`. Sets the metadata base and the host in `robots.txt` / `sitemap.xml` — set it in production. Auth does **not** use it; sign-in derives its redirect from `window.location.origin` |
+| `NEXT_PUBLIC_SITE_URL` | no | The canonical origin: metadata base, Open Graph and canonical URLs, and the host in `robots.txt` / `sitemap.xml`. Unset, `siteUrl()` falls back to Vercel's own `VERCEL_PROJECT_PRODUCTION_URL`, then `VERCEL_URL`, then `http://localhost:3000` — so a Vercel deploy is correct with nothing configured. Auth does **not** use it; sign-in derives its redirect from `window.location.origin` |
 | `GEMINI_GENERATOR_MODELS` | no | `gemini-3.5-flash,gemini-3.6-flash,gemini-2.5-flash` |
 | `GEMINI_CHECKER_MODELS` | no | `gemini-3.5-flash-lite,gemini-2.5-flash-lite,gemini-2.5-flash` |
 | `GEMINI_CONCURRENCY` | no | `3` — free-tier limits are around 10 RPM |
@@ -142,13 +170,19 @@ npx vitest run -t "normalizeMath"               # one test by name
 ```
 
 - **`core.test.ts`** — answer normalization and comparison, plus a structural validation of every template across 25 seeds × every declared difficulty and format.
-- **`formats.test.ts`** — the per-format round trip: author → split into DB columns → grade → render. Keyed off `PROBLEM_FORMATS`, so a new format without a fixture fails here rather than in production.
+- **`formats.test.ts`** — the per-format round trip: author → split into DB columns → grade → render → print. Keyed off `PROBLEM_FORMATS`, so a new format without a fixture fails here rather than in production.
+- **`disclosure.test.ts`** — the rule deciding whether the answer key is in a response, stated as an invariant: across every mode and prior state, nothing both offers a retry and discloses the answer.
+- **`coach-plan.test.ts`** — targeted-set configuration. A security boundary as much as a feature: `focus.directives` reaches a model prompt verbatim, so this asserts what comes out is always buildable and that mistake notes are flattened before they land inside a quoted string.
+- **`production.test.ts`** — the CSP builder, the daily-limit table, `siteUrl()` resolution order, sign-in error copy, and the share-code guard.
 - **`analytics.test.ts`** — streaks, smoothing and weakness ranking, run against a pure `aggregate()`.
+- **`plot.test.ts`** — plot geometry and SVG output, which is a pure string.
+- **`scan.test.ts`** — the "not attempted" rule that keeps a blank from being recorded as a miss.
 - **`provider-schema.test.ts`** — asserts no schema sent to a model contains `$ref` / `$defs` / `$schema`. Gemini only supports `$ref` in non-required properties, and a regression fails at request time with an opaque 400.
-- **`live-provider.test.ts`** — hits the real API and self-skips without a key:
+- **`live-provider.test.ts`** and **`live-account.test.ts`** — hit the real API and the real database, and self-skip without their key, so `npm run test` stays offline:
 
   ```bash
   node --env-file=.env.local ./node_modules/vitest/vitest.mjs run src/lib/__tests__/live-provider.test.ts
+  node --env-file=.env.local ./node_modules/vitest/vitest.mjs run src/lib/__tests__/live-account.test.ts
   ```
 
 ## Project structure
@@ -158,9 +192,13 @@ src/
 ├── app/                 # routes — every page is a Server Component
 │   ├── api/sets/        # SSE set builder (maxDuration 300)
 │   ├── api/check/       # the only path that ever returns an answer key
+│   ├── api/scan/        # marks a photographed worksheet
 │   ├── build/ sets/     # builder + library
-│   ├── set/[id]/        # practice · quiz · flashcards
+│   ├── set/[id]/        # practice · quiz · flashcards · scan · print
 │   ├── review/ stats/   # missed-problem queue · analytics + prescriptions
+│   ├── account/         # clear history · delete data · delete account
+│   ├── privacy/ terms/  # the legal pages
+│   ├── signin/          # owns the sign-in attempt and names its failures
 │   └── s/[code]/        # shared-set landing
 ├── components/          # client components; practice engines, inputs, design bits
 ├── lib/
@@ -170,8 +208,15 @@ src/
 │   ├── sets.ts          # the build pipeline
 │   ├── answers.ts       # normalizeMath and the local grading ladder
 │   ├── analytics.ts     # stats derived from attempts
+│   ├── limits.ts        # every daily cap, in one table
+│   ├── env.ts           # every environment variable, read in one place
+│   ├── csp.ts           # the per-request Content-Security-Policy
+│   ├── plot.ts          # declarative plot spec → SVG, server-side only
+│   ├── print-key.ts     # answer keys for printed worksheets
+│   ├── worksheets.ts    # scan uploads and their grading
+│   ├── account.ts       # the three levels of data deletion
 │   └── math-render.ts   # KaTeX, server-side only
-└── proxy.ts             # Next 16's renamed middleware — refreshes the Supabase session
+└── proxy.ts             # Next 16's renamed middleware — session refresh + CSP nonce
 ```
 
 ## Security model
@@ -201,6 +246,16 @@ Two Supabase advisor items are expected here rather than bugs:
 
 Still open: leaked-password protection is off. It doesn't apply today (anonymous + Google only, no passwords), but turn it on before adding email/password sign-in.
 
+### Headers
+
+`next.config.ts` sets HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy` for every response. The Content-Security-Policy is built per request in `src/proxy.ts` instead, because it carries a nonce: Next reads the nonce out of the request's CSP header and stamps it onto every script it emits, so `script-src` needs no `'unsafe-inline'`. The usual objection to nonces — that they force dynamic rendering — costs nothing here, since every page already sets `force-dynamic`.
+
+`style-src` keeps `'unsafe-inline'` deliberately. A nonce there would *disable* it (CSP ignores `'unsafe-inline'` once a nonce is present), breaking progress meters and `next/font`, to defend against a far smaller risk than script injection.
+
+## Privacy
+
+`/privacy` and `/terms` describe what the app actually does, and are worth reading before deploying your own instance — particularly the note that content sent through the free tier of Google AI Studio may be reviewed by Google. That matters most for worksheet scans, which can carry a student's name and handwriting. `/account` offers three levels of deletion, all immediate, with storage swept before the database cascade so no orphaned files survive.
+
 ## Notes for contributors
 
 A few invariants here are easy to break silently and none of them fail loudly:
@@ -215,5 +270,7 @@ A few invariants here are easy to break silently and none of them fail loudly:
 
 ## Roadmap
 
-- **Phase 3** — scan a completed worksheet for AI grading, graph-based questions, matching format, multi-part problems, printable worksheets with answer keys
-- **Phase 4** — problem quality loop, spaced repetition on top of the review queue
+Everything previously listed here — worksheet scanning, graph questions, the matching and multi-part formats, and printable worksheets with answer keys — has shipped. What's left:
+
+- **Spaced repetition** on top of the review queue, so a topic resurfaces on a schedule rather than only when you go looking for it
+- **A problem quality loop** — feeding grading disagreements and reported problems back into the pool, so a bad problem that survives verification is retired rather than served forever

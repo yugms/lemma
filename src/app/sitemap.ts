@@ -1,10 +1,14 @@
 import type { MetadataRoute } from "next";
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://lemma.app";
+import { siteUrl } from "@/lib/env";
 
 export default function sitemap(): MetadataRoute.Sitemap {
+  const base = siteUrl();
   return [
-    { url: SITE_URL, changeFrequency: "monthly", priority: 1 },
-    { url: `${SITE_URL}/build`, changeFrequency: "monthly", priority: 0.8 },
+    { url: base, changeFrequency: "monthly", priority: 1 },
+    { url: `${base}/build`, changeFrequency: "monthly", priority: 0.8 },
+    // Low priority, but they should be findable rather than only reachable
+    // from the footer — a policy nobody can locate is not much of a policy.
+    { url: `${base}/privacy`, changeFrequency: "yearly", priority: 0.3 },
+    { url: `${base}/terms`, changeFrequency: "yearly", priority: 0.3 },
   ];
 }

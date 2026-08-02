@@ -32,11 +32,6 @@ export type WorksheetUpload = {
   created_at: string;
 };
 
-/** Where one page of one upload lives. Prefixed by owner, per the RLS policy. */
-export function scanPath(userId: string, uploadId: string, index: number, ext: string): string {
-  return `${userId}/${uploadId}/${index}.${ext}`;
-}
-
 export async function createUpload(
   userId: string,
   setId: string,

@@ -77,6 +77,18 @@ One set of zod schemas defines model structured outputs, the `problems` jsonb co
 
 **Grading** (`src/lib/answers.ts` + `src/lib/ai/check-answer.ts`, submission time): local `normalizeMath()` comparison first — LaTeX → canonical ASCII, then exact match, acceptable forms, numeric parse, multiset compare for multi-valued answers. Only a `"uncertain"` result escalates to an AI equivalence call. `normalizeMath` is shared by both ladders, so changes to it affect verification and grading together — `core.test.ts` covers it.
 
+### Two modules own things that were previously scattered
+
+**`src/lib/env.ts` is the only place `process.env` is read** (outside the model-chain overrides in `provider.ts`). It replaced eight `process.env.X!` assertions whose failure mode was `supabaseUrl is required` thrown from inside a vendor module — true, but naming neither the variable nor where to set it.
+
+`siteUrl()` is the important one, and its fallback order is load-bearing: explicit `NEXT_PUBLIC_SITE_URL`, then Vercel's `VERCEL_PROJECT_PRODUCTION_URL`, then `VERCEL_URL`, then localhost with a warning. It previously fell back to a hardcoded `https://lemma.app` — a domain the project does not own — so production served a `robots.txt` advertising someone else's sitemap and OG tags pointing off-site. **Nothing in that chain may ever produce a host the deployment does not serve.** It does not throw on the last step, because throwing fails a plain `npm run build`; `production.test.ts` pins the order.
+
+Note that `NEXT_PUBLIC_*` inlining only works for a *literal* `process.env.NAME` expression. A dynamic lookup compiles to an undefined read in the browser, which is why those reads are spelled out rather than driven from a list.
+
+**`src/lib/limits.ts` holds every daily cap in one table.** Adding a spend path means adding a row there, not a new bespoke count. Two of the five behave differently on refusal and the difference is deliberate: a refused scan returns a message, but exhausted AI grading must fall back to the local verdict and skip the diagnosis — a student mid-set loses the explanation, never the mark. `checkSubmission(..., { allowAi: false })` is how, and it resolves an inconclusive answer to incorrect, which is already what happens when the provider is unreachable.
+
+`aiGradingAllowed` returns `true` when its own count query fails. Guessing permissively costs one model call; guessing the other way silently switches every student into degraded grading for the rest of the day.
+
 ### Supabase: three clients, pick deliberately
 
 | File | Key | Use |
@@ -104,6 +116,20 @@ Server Actions (`src/app/sets/actions.ts`) use the RLS-scoped server client deli
 Scanned marks are written as `attempts` rows with `mode: "scan"` (`scored`, no retry — the paper is already written), so they feed Review, Stats and the coach like typed practice. Rows are inserted one at a time because `attempts_one_per_attempt` makes duplicates *expected* — the student may have typed some problems already — and a batch insert would lose every mark to one collision. A conflict skips that problem and leaves the earlier outcome standing.
 
 `worksheet_uploads` has INSERT/SELECT policies but no UPDATE, which is correct: `status` and `grading` are written by the service client after marking, and a client that could write them could mark its own work.
+
+### Printing, and the loop it closes
+
+`src/app/set/[id]/print` is the other half of scanning: nothing produced the paper that scanning assumes. It renders through `prepareProblem()` unchanged, so KaTeX and plots stay in Node.
+
+Two rules. The answer key is behind `?key=1` and `loadAnswerKey()` **re-proves ownership** rather than trusting the page above it — it reads the `answer` column, so it gets its own check, on the same reasoning as `/api/check`. And the `@media print` block in `globals.css` forces the light palette over both the media query and an explicit `[data-theme]`: a plot drawn in dark mode is light strokes on a dark fill, which prints as an unreadable black rectangle, so a student practising at night would otherwise print an unusable sheet.
+
+Both the key renderer (`print-key.ts`) and the on-paper answer space (`components/print/answer-space.tsx`) end in `assertNeverFormat`, so adding a format is a compile error here too — the failure they prevent is a question printed with nowhere to answer it, which is only discovered once the sheet is handed out.
+
+### Security headers and the CSP nonce
+
+Static headers live in `next.config.ts`; the CSP is built per request in `src/proxy.ts` because it carries a nonce. The proxy sets it on the *request* as well as the response — Next parses the request's CSP header during render and stamps the nonce onto every script it emits. Anything the app injects itself needs the nonce by hand, which today is the theme script in `layout.tsx` (blocked → a flash of the wrong theme on every load).
+
+`style-src` deliberately keeps `'unsafe-inline'` and takes no nonce: a nonce there would *disable* `'unsafe-inline'` rather than add to it, breaking progress meters and `next/font`. Scripts get the nonce; styles do not.
 
 ### Deleting your own data
 

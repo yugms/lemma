@@ -7,6 +7,7 @@ import { renderMath, renderProse } from "@/lib/math-render";
 import { curveFromAuthored, plotFromSpec, renderPlot } from "@/lib/plot";
 import { assertNeverFormat } from "@/lib/ai/schemas";
 import { ATTEMPT_MODES, MODE_RULES, retryEligible, shouldDisclose } from "@/lib/attempt-state";
+import { aiGradingAllowed } from "@/lib/limits";
 import type {
   CheckResponse,
   FeedbackResult,
@@ -290,13 +291,15 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
-    const outcome = await checkSubmission(content, answer, body.answer);
+    const allowAi = await aiGradingAllowed(user.id, user.is_anonymous ?? false);
+    const outcome = await checkSubmission(content, answer, body.answer, { allowAi });
     // Diagnose the second attempt on its own terms. Reusing the first attempt's
     // note would explain an answer the student is no longer giving, and the
     // retry is the one moment the diagnosis matters most.
-    const retryFeedback = outcome.correct
-      ? null
-      : await wrongAnswerFeedback(content, answer, explanation, body.answer);
+    const retryFeedback =
+      outcome.correct || !allowAi
+        ? null
+        : await wrongAnswerFeedback(content, answer, explanation, body.answer);
 
     // The retry is the last word, so the solution is disclosed either way.
     const { error } = await db.from("attempts").insert({
@@ -347,9 +350,13 @@ export async function POST(request: NextRequest) {
     return Response.json({ revealed: true, ...disclosure() } satisfies CheckResponse);
   }
 
-  const outcome = await checkSubmission(content, answer, body.answer);
+  // A day's grading budget covers both the equivalence check and the
+  // diagnosis. Over it, the answer is still graded — locally — and only the
+  // explanation is lost. See `aiGradingAllowed`.
+  const allowAi = await aiGradingAllowed(user.id, user.is_anonymous ?? false);
+  const outcome = await checkSubmission(content, answer, body.answer, { allowAi });
   let feedback = null;
-  if (!outcome.correct) {
+  if (!outcome.correct && allowAi) {
     feedback = await wrongAnswerFeedback(content, answer, explanation, body.answer);
   }
 

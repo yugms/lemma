@@ -18,18 +18,36 @@ import {
   type PlotCurve,
 } from "@/lib/plot";
 
+export type CheckMethod = "local" | "ai";
+
 export type CheckOutcome = {
   correct: boolean;
   /** How the answer was decided. */
-  method: "local" | "ai";
+  method: CheckMethod;
 };
 
-/** Decide whether a submitted answer is correct, using AI only when local comparison is inconclusive. */
+/**
+ * Decide whether a submitted answer is correct, using AI only when local
+ * comparison is inconclusive.
+ *
+ * `allowAi: false` grades entirely locally, which the daily grading budget uses
+ * when a user has spent theirs. An inconclusive answer then resolves to
+ * incorrect — the same outcome `aiEquivalent` already produces when the
+ * provider is unreachable (it returns `false` rather than throwing), so this is
+ * an existing degradation being reached deliberately rather than a new rule.
+ * The budget is set well above ordinary practice for exactly that reason.
+ */
 export async function checkSubmission(
   content: ProblemContentRecord,
   answer: ProblemAnswerRecord,
-  submitted: unknown
+  submitted: unknown,
+  { allowAi = true }: { allowAi?: boolean } = {}
 ): Promise<CheckOutcome> {
+  const aiEquivalent = allowAi ? askModelIfEquivalent : notEquivalentWithoutAsking;
+  // Reported honestly: with no budget left nothing was asked, so the verdict
+  // came from local comparison however it reads.
+  const escalationMethod = allowAi ? "ai" : "local";
+
   switch (content.format) {
     case "mcq":
       return {
@@ -73,7 +91,7 @@ export async function checkSubmission(
             blank.answer.value_latex,
             blank.answer.acceptable_forms
           );
-          if (!eq) return { correct: false, method: "ai" };
+          if (!eq) return { correct: false, method: escalationMethod };
         }
       }
       return { correct: true, method: "local" };
@@ -88,7 +106,7 @@ export async function checkSubmission(
         : checkOpenAnswer(student, canonical);
       if (res !== "uncertain") return { correct: res === "correct", method: "local" };
       const eq = await aiEquivalent(student, canonical.value_latex, canonical.acceptable_forms);
-      return { correct: eq, method: "ai" };
+      return { correct: eq, method: escalationMethod };
     }
 
     case "matching": {
@@ -117,7 +135,7 @@ export async function checkSubmission(
         const res = part.answer.multi_valued
           ? checkMultiAnswer(student, part.answer)
           : checkOpenAnswer(student, part.answer);
-        if (res === "incorrect") return { correct: false, method: usedAi ? "ai" : "local" };
+        if (res === "incorrect") return { correct: false, method: usedAi ? escalationMethod : "local" };
         if (res === "uncertain") {
           usedAi = true;
           const eq = await aiEquivalent(
@@ -125,10 +143,10 @@ export async function checkSubmission(
             part.answer.value_latex,
             part.answer.acceptable_forms
           );
-          if (!eq) return { correct: false, method: "ai" };
+          if (!eq) return { correct: false, method: escalationMethod };
         }
       }
-      return { correct: true, method: usedAi ? "ai" : "local" };
+      return { correct: true, method: usedAi ? escalationMethod : "local" };
     }
 
     case "graph": {
@@ -146,7 +164,7 @@ export async function checkSubmission(
             canonical.value_latex,
             canonical.acceptable_forms
           );
-          return { correct: eq, method: "ai" };
+          return { correct: eq, method: escalationMethod };
         }
         case "points":
           // Both sides are lattice points by construction, so this is exact —
@@ -217,7 +235,12 @@ function submittedIds(submitted: unknown): string[] {
     .map((x) => x.trim().toUpperCase());
 }
 
-async function aiEquivalent(
+/** Stands in for the model call when the caller has no budget left for one. */
+async function notEquivalentWithoutAsking(): Promise<boolean> {
+  return false;
+}
+
+async function askModelIfEquivalent(
   student: string,
   reference: string,
   acceptableForms: string[] = []

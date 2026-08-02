@@ -1,5 +1,6 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { z, type ZodType } from "zod";
+import { geminiApiKey } from "@/lib/env";
 
 /**
  * Model provider.
@@ -66,13 +67,7 @@ let client: GoogleGenAI | null = null;
 
 function getClient(): GoogleGenAI {
   if (!client) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        "GEMINI_API_KEY is not set. Create a free key at https://aistudio.google.com/apikey and add it to .env.local"
-      );
-    }
-    client = new GoogleGenAI({ apiKey });
+    client = new GoogleGenAI({ apiKey: geminiApiKey() });
   }
   return client;
 }

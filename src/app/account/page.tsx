@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Check } from "lucide-react";
 import { getCurrentUser, toHeaderUser } from "@/lib/auth-server";
@@ -9,10 +8,41 @@ import { DangerZone } from "@/components/account/danger-zone";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Account" };
 
+/**
+ * The honest answer for a visitor with no session: there is genuinely nothing
+ * here yet, and nothing to delete. A session is created the first time they
+ * build a set, not on arrival.
+ */
+function NothingStored() {
+  return (
+    <div className="mx-auto max-w-2xl">
+      <p className="eyebrow eyebrow-accent">Account</p>
+      <h1 className="display mt-5 text-title">Nothing stored yet.</h1>
+      <p className="mt-7 text-prose text-muted">
+        This browser has no session, so lemma is holding no sets, no answers and no
+        uploads for you. One is created the moment you build your first set — until
+        then there is nothing here to manage or remove.
+      </p>
+      <div className="mt-9 flex flex-wrap gap-3">
+        <Link href="/build" className="btn btn-accent">
+          Build a set
+        </Link>
+        <Link href="/privacy" className="btn btn-outline">
+          Read the privacy policy
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export default async function AccountPage() {
   const authUser = await getCurrentUser();
-  // No session at all means nothing to show and nothing to delete.
-  if (!authUser) notFound();
+  // No session at all — a first visit, or a browser that has been cleared.
+  // This used to 404, which was defensible when the only way here was your own
+  // name in the header. The privacy policy now links here as the place to
+  // remove your data, and a 404 at the end of that sentence reads as the
+  // controls being gone rather than as there being nothing to remove.
+  if (!authUser) return <NothingStored />;
 
   const user = toHeaderUser(authUser);
   const isGuest = Boolean(user?.isGuest);
