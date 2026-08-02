@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import { capFor, startOfToday } from "@/lib/limits";
 import { ITEM_SELECT, sanitizeItems, type SetConfig, type SetMeta } from "@/lib/sets";
 import { newShareCode, normalizeShareCode } from "@/lib/share-code";
 import type { SanitizedProblem } from "@/lib/ai/schemas";
@@ -13,9 +14,6 @@ import type { SanitizedProblem } from "@/lib/ai/schemas";
  * Widening that check to "or you know the code" would have been the smaller
  * diff and the much larger security surface.
  */
-
-/** Copies cost nothing to make, so they are bounded on their own terms. */
-const COPIES_PER_DAY = 10;
 
 export type SharedSet = {
   set: Pick<SetMeta, "id" | "title" | "created_at"> & { config: SetConfig };
@@ -81,16 +79,16 @@ export async function copySharedSet(
 
   const db = createServiceClient();
 
-  const since = new Date();
-  since.setHours(0, 0, 0, 0);
   const { count } = await db
     .from("problem_sets")
     .select("id", { count: "exact", head: true })
     .eq("owner_id", userId)
     .not("config->>copiedFrom", "is", null)
-    .gte("created_at", since.toISOString());
-  if ((count ?? 0) >= COPIES_PER_DAY) {
-    return { error: `That's ${COPIES_PER_DAY} shared sets today — work through one first.` };
+    .gte("created_at", startOfToday().toISOString());
+  // Copies cost nothing to make, so they are bounded on their own terms.
+  const copyCap = capFor("sharedCopies", false);
+  if ((count ?? 0) >= copyCap) {
+    return { error: `That's ${copyCap} shared sets today — work through one first.` };
   }
 
   const { data: created, error: setErr } = await db

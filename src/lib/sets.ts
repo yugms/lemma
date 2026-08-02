@@ -17,6 +17,7 @@ import { generateProblems, repairProblem, type TopicInfo } from "@/lib/ai/genera
 import { mapConcurrent, solveIndependently, solverAgrees, verifyProblem } from "@/lib/ai/verify";
 import { AI_CONCURRENCY } from "@/lib/ai/provider";
 import { instantiate, templatesFor } from "@/lib/templates";
+import { capFor, startOfToday } from "@/lib/limits";
 
 
 export type SetConfig = {
@@ -107,8 +108,6 @@ export async function* buildProblemSet(
   const count = Math.min(Math.max(config.count, 1), MAX_COUNT);
 
   // --- daily cap ---
-  const since = new Date();
-  since.setHours(0, 0, 0, 0);
   // Only sets that actually cost a model call count. Review sets and copies of
   // shared sets are assembled from problems that already exist, so counting
   // them would let a student spend their whole generation allowance on sets
@@ -119,14 +118,14 @@ export async function* buildProblemSet(
     .eq("owner_id", userId)
     .is("config->>review", null)
     .is("config->>copiedFrom", null)
-    .gte("created_at", since.toISOString());
-  const cap = isAnonymous ? 5 : 20;
+    .gte("created_at", startOfToday().toISOString());
+  const cap = capFor("generatedSets", isAnonymous);
   if ((todayCount ?? 0) >= cap) {
     yield {
       type: "error",
       message: isAnonymous
-        ? "Daily limit reached for guests (5 sets). Sign in with Google for a higher limit."
-        : "Daily limit reached (20 sets). Try again tomorrow.",
+        ? `Daily limit reached for guests (${cap} sets). Sign in with Google for a higher limit.`
+        : `Daily limit reached (${cap} sets). Try again tomorrow.`,
     };
     return;
   }
