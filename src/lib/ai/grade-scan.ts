@@ -47,6 +47,21 @@ const ScanResultSchema = z.object({
 export type ScanMark = z.infer<typeof ScanMarkSchema>;
 export type ScanResult = z.infer<typeof ScanResultSchema>;
 
+/**
+ * Did the student actually answer this one?
+ *
+ * A blank is "not attempted", which is not the same as "wrong", and the
+ * difference is permanent: an unattempted problem recorded as a miss follows
+ * the student through Stats, Review and the coach forever. Observed in
+ * practice — a page numbered "6)" with nothing after it came back `found: true,
+ * read_answer: "", correct: false, confidence: 1`, so the confidence gate let
+ * it straight through. Confidence guards *misreading*; this is a different
+ * failure, and it has to be decided here rather than trusted from the model.
+ */
+export function wasAttempted(m: ScanMark): boolean {
+  return m.found && m.read_answer.trim().length > 0;
+}
+
 export type ScanProblem = {
   id: string;
   position: number;

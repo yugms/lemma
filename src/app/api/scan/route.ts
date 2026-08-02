@@ -2,7 +2,12 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { gradeScan, SCAN_CONFIDENCE_THRESHOLD, type ScanProblem } from "@/lib/ai/grade-scan";
+import {
+  gradeScan,
+  SCAN_CONFIDENCE_THRESHOLD,
+  wasAttempted,
+  type ScanProblem,
+} from "@/lib/ai/grade-scan";
 import {
   createUpload,
   finishUpload,
@@ -131,10 +136,13 @@ export async function POST(request: NextRequest) {
   // A mark for a problem that isn't in the set is a hallucinated page number.
   const marks = result.marks.filter((m) => byPosition.has(m.problem_number));
 
-  const confident = marks.filter(
-    (m) => m.found && m.confidence >= SCAN_CONFIDENCE_THRESHOLD
-  );
-  const uncertain = marks.filter((m) => m.found && m.confidence < SCAN_CONFIDENCE_THRESHOLD);
+  // Unattempted problems are reported back but never recorded — see
+  // `wasAttempted`. Leaving them out of both buckets means they are neither
+  // written nor offered for confirmation: there is nothing to confirm about a
+  // blank, and nothing about it belongs in the student's record.
+  const answered = marks.filter(wasAttempted);
+  const confident = answered.filter((m) => m.confidence >= SCAN_CONFIDENCE_THRESHOLD);
+  const uncertain = answered.filter((m) => m.confidence < SCAN_CONFIDENCE_THRESHOLD);
 
   const recorded = await recordScanAttempts(
     user.id,
@@ -169,8 +177,12 @@ async function confirmReadings(
   if (!upload?.grading) return Response.json({ error: "Not found" }, { status: 404 });
 
   const pending = new Set(upload.grading.needs_confirmation);
+  // Blanks never enter `needs_confirmation`, so re-checking here is belt and
+  // braces — but this is the one path that turns a mark into permanent history
+  // on the student's say-so, and it should not depend on an upstream filter.
   const chosen = upload.grading.marks.filter(
-    (m) => pending.has(m.problem_number) && positions.includes(m.problem_number)
+    (m) =>
+      wasAttempted(m) && pending.has(m.problem_number) && positions.includes(m.problem_number)
   );
   if (chosen.length === 0) {
     return Response.json({ error: "Nothing left to confirm." }, { status: 409 });

@@ -53,7 +53,9 @@ confidence is about job 1 ONLY: how sure you are that you read the handwriting c
 
 Accept mathematically equivalent forms: 0.5 and 1/2 and \\frac{1}{2} are the same answer, as are equivalent orderings of a solution set. Do not require the student's notation to match the key's.
 
-Mark only the final answer, not the method — the student is not being graded on presentation. If a problem does not appear on the pages at all, set found=false and correct=false rather than guessing at it.
+Mark only the final answer, not the method — the student is not being graded on presentation.
+
+found=false means the student did not answer it. Use it both when the problem is absent from the pages entirely AND when it is numbered but left empty — a bare "6)" with nothing after it is not an attempt, so it is not a wrong answer either. Leave read_answer as an empty string in that case. Never mark an unanswered problem correct=true.
 
 Write note in the second person, one sentence, addressed to the student.`;
 

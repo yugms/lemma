@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import clsx from "clsx";
-import { AlertTriangle, Check, HelpCircle, Loader2, Upload, X } from "lucide-react";
-import type { ScanMark } from "@/lib/ai/grade-scan";
+import { Check, HelpCircle, Loader2, Minus, Upload, X } from "lucide-react";
+import { wasAttempted, type ScanMark } from "@/lib/ai/grade-scan";
 import type { WorksheetGrading } from "@/lib/worksheets";
 
 /** Kept in step with the storage policy's `${userId}/...` prefix. */
@@ -126,8 +126,10 @@ export function ScanWorkspace({
 
   const marks = grading?.marks ?? [];
   const pending = new Set(grading?.needs_confirmation ?? []);
-  const found = marks.filter((m) => m.found);
-  const right = found.filter((m) => m.correct).length;
+  // Scored out of what was actually attempted. Counting blanks against the
+  // student would report "3/6" for a page they only got three-quarters through.
+  const answered = marks.filter(wasAttempted);
+  const right = answered.filter((m) => m.correct).length;
 
   return (
     <div className="space-y-10">
@@ -214,7 +216,9 @@ export function ScanWorkspace({
           <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-3">
             <h2 className="eyebrow">Marked</h2>
             <p className="mono-meta">
-              {right}/{found.length} correct
+              {right}/{answered.length} correct
+              {marks.length > answered.length &&
+                ` · ${marks.length - answered.length} not attempted`}
               {grading.recorded.length > 0 && ` · ${grading.recorded.length} recorded`}
             </p>
           </div>
@@ -260,19 +264,23 @@ export function ScanWorkspace({
 }
 
 function MarkRow({ mark, pending }: { mark: ScanMark; pending: boolean }) {
+  // Three outcomes, not two: correct, incorrect, and never answered. The third
+  // is deliberately not styled as a miss — the student didn't get it wrong.
+  const attempted = wasAttempted(mark);
+
   return (
     <li className="flex gap-4">
       <span
         aria-hidden
         className={clsx(
           "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
-          !mark.found && "bg-sunk text-faint",
-          mark.found && mark.correct && "bg-ok-wash text-ok",
-          mark.found && !mark.correct && "bg-bad-wash text-bad"
+          !attempted && "bg-sunk text-faint",
+          attempted && mark.correct && "bg-ok-wash text-ok",
+          attempted && !mark.correct && "bg-bad-wash text-bad"
         )}
       >
-        {!mark.found ? (
-          <AlertTriangle className="h-3 w-3" aria-hidden />
+        {!attempted ? (
+          <Minus className="h-3 w-3" aria-hidden />
         ) : mark.correct ? (
           <Check className="h-3 w-3" strokeWidth={3} aria-hidden />
         ) : (
@@ -284,8 +292,8 @@ function MarkRow({ mark, pending }: { mark: ScanMark; pending: boolean }) {
         <p className="mono-meta flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>problem {mark.problem_number}</span>
           {/* Never colour alone — the word carries it with the icon. */}
-          {!mark.found ? (
-            <span>not found on the page</span>
+          {!attempted ? (
+            <span>not answered · not recorded</span>
           ) : (
             <span className={mark.correct ? "text-ok" : "text-bad"}>
               {mark.correct ? "correct" : "incorrect"}
@@ -293,10 +301,10 @@ function MarkRow({ mark, pending }: { mark: ScanMark; pending: boolean }) {
           )}
           {pending && <span className="text-muted">awaiting your confirmation</span>}
         </p>
-        {mark.found && (
+        {attempted && (
           <p className="mt-2 text-[15px] leading-7">
             <span className="text-faint">Read as</span>{" "}
-            <span className="font-mono">{mark.read_answer || "(blank)"}</span>
+            <span className="font-mono">{mark.read_answer}</span>
           </p>
         )}
         {mark.note && (
