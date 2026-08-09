@@ -66,7 +66,7 @@ function hashOf(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-type VerifiedProblem = { problem: TaggedProblem; verification: unknown };
+export type VerifiedProblem = { problem: TaggedProblem; verification: unknown };
 
 /**
  * Verify one authored problem, with a single repair attempt when the solver
@@ -75,8 +75,26 @@ type VerifiedProblem = { problem: TaggedProblem; verification: unknown };
  * Up to three model calls, and it deliberately holds one pool slot for all of
  * them: a repair is the tail of one verification, not a new piece of work
  * entitled to its own share of the RPM budget.
+ *
+ * Never rejects, and that is the point. `callStructured` throws when a whole
+ * model chain is rate-limited, which on a free tier is an ordinary Tuesday —
+ * and an unhandled rejection here propagates out of `buildProblemSet` and fails
+ * the request, discarding the pool problems, the templates, and every problem
+ * that verified perfectly well alongside this one. A check that cannot reach a
+ * model discards its own problem, exactly like a check that failed.
  */
-async function verifyOrRepair(
+export async function verifyOrRepair(
+  p: TaggedProblem,
+  difficulty: number
+): Promise<VerifiedProblem | null> {
+  try {
+    return await runChecks(p, difficulty);
+  } catch {
+    return null;
+  }
+}
+
+async function runChecks(
   p: TaggedProblem,
   difficulty: number
 ): Promise<VerifiedProblem | null> {

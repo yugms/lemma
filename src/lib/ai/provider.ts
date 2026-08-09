@@ -12,6 +12,17 @@ import { geminiApiKey } from "@/lib/env";
  * config change plus a new `callStructured` body, not a rewrite.
  */
 
+/**
+ * Both numbers below fail badly rather than loudly when mistyped: `Number("六")`
+ * is NaN, and NaN silently disables the concurrency pool in one case and makes
+ * `Math.ceil(wanted / NaN)` produce *zero* authoring calls in the other — an
+ * empty set with nothing in the logs to explain it. Fall back to the default.
+ */
+function positiveInt(env: string | undefined, fallback: number): number {
+  const parsed = Number(env);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 const modelList = (env: string | undefined, fallback: string[]) =>
   env
     ? env
@@ -47,7 +58,7 @@ export const CHECKER_MODELS = modelList(process.env.GEMINI_CHECKER_MODELS, [
  * be the whole build's budget against the free tier's tight (~10 RPM) limit
  * rather than one phase's — see `createCallPool`.
  */
-export const AI_CONCURRENCY = Number(process.env.GEMINI_CONCURRENCY ?? 6);
+export const AI_CONCURRENCY = positiveInt(process.env.GEMINI_CONCURRENCY, 6);
 
 /**
  * Problems asked for in one authoring call — the other half of the same
@@ -60,7 +71,7 @@ export const AI_CONCURRENCY = Number(process.env.GEMINI_CONCURRENCY ?? 6);
  * and puts twice the pressure on a free tier that answers bursts with 503s.
  * Twelve problems took 58s at six per call and 66s at three.
  */
-export const PROBLEMS_PER_CALL = Number(process.env.GEMINI_PROBLEMS_PER_CALL ?? 6);
+export const PROBLEMS_PER_CALL = positiveInt(process.env.GEMINI_PROBLEMS_PER_CALL, 6);
 
 /** Attempts per model before falling through to the next one in the chain. */
 const ATTEMPTS_PER_MODEL = 3;

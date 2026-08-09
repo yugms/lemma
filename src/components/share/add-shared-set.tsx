@@ -23,9 +23,14 @@ export function AddSharedSet({ code, alreadyMine }: { code: string; alreadyMine:
     try {
       const { ensureUser } = await import("@/lib/auth");
       await ensureUser();
-    } catch {
+    } catch (e) {
       setPreparing(false);
-      setError("Couldn't start a session — reload and try again.");
+      // The age gate throws through here too, and its message explains a choice
+      // the generic line contradicts: someone who declined is not helped by
+      // being told to reload. Keep the fallback for a real session failure.
+      setError(
+        e instanceof Error ? e.message : "Couldn't start a session — reload and try again."
+      );
       return;
     }
     setPreparing(false);
