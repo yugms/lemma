@@ -301,6 +301,7 @@ export async function solveIndependently(p: GeneratedProblem): Promise<SolverRes
   }
   return callStructured({
     models: CHECKER_MODELS,
+    label: `solve:${p.format}`,
     system: SOLVER_SYSTEM_PROMPT,
     prompt: statement,
     schema: SolverResultSchema,
@@ -451,22 +452,4 @@ export async function verifyProblem(
     return { ok: false, reason: `answer mismatch: solver got ${solver.final_answer_latex}`, solver };
 
   return { ok: true, solver };
-}
-
-/** Run an async mapper with bounded concurrency. */
-export async function mapConcurrent<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return results;
 }

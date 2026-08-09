@@ -40,10 +40,27 @@ export const CHECKER_MODELS = modelList(process.env.GEMINI_CHECKER_MODELS, [
 ]);
 
 /**
- * Free-tier request-per-minute limits are tight (~10 RPM), so verification
- * fans out narrowly and every call backs off on 429.
+ * Concurrent model calls allowed inside one set build.
+ *
+ * This used to bound verification alone, which was safe while authoring ran
+ * strictly one call at a time. Authoring fans out too now, so the number has to
+ * be the whole build's budget against the free tier's tight (~10 RPM) limit
+ * rather than one phase's — see `createCallPool`.
  */
-export const AI_CONCURRENCY = Number(process.env.GEMINI_CONCURRENCY ?? 3);
+export const AI_CONCURRENCY = Number(process.env.GEMINI_CONCURRENCY ?? 6);
+
+/**
+ * Problems asked for in one authoring call — the other half of the same
+ * throughput dial, which is why it lives here rather than next to its caller.
+ *
+ * Smaller looks like it should be faster, since the calls now run side by side
+ * and a model writes a batch one token at a time. Measured, it is not: a call
+ * spends 3.5-7k thinking tokens planning the batch almost regardless of how
+ * many problems it holds, so halving the batch roughly doubles that overhead
+ * and puts twice the pressure on a free tier that answers bursts with 503s.
+ * Twelve problems took 58s at six per call and 66s at three.
+ */
+export const PROBLEMS_PER_CALL = Number(process.env.GEMINI_PROBLEMS_PER_CALL ?? 6);
 
 /** Attempts per model before falling through to the next one in the chain. */
 const ATTEMPTS_PER_MODEL = 3;
@@ -57,11 +74,64 @@ const ATTEMPTS_PER_MODEL = 3;
  */
 const DEFAULT_BUDGET_MS = 60_000;
 /**
- * No single attempt may eat the entire budget and starve the fallbacks, but the
- * cap has to clear the time a real batch takes to write — too tight and every
- * model "times out" on work that would have succeeded.
+ * Floor on what one attempt may use. The cap itself is derived from the caller's
+ * budget, because a flat ceiling is wrong in the one place it matters: the
+ * generator asks for 150s to write a batch, and clamping each attempt to 60s
+ * aborted batches that were still being written. An abort is classified
+ * retryable, so the call then spent the rest of its budget on retries that were
+ * always going to be cut off at exactly the same point — 150s to produce
+ * nothing. Half the budget still leaves room for a fallback model to try.
  */
-const MAX_ATTEMPT_MS = 60_000;
+const MIN_ATTEMPT_MS = 60_000;
+
+const attemptCap = (budgetMs: number) => Math.max(MIN_ATTEMPT_MS, Math.floor(budgetMs / 2));
+
+/**
+ * One line per model call.
+ *
+ * Nothing recorded how long a call took, which model answered, or whether a
+ * fallback fired, so a slow build and a stalled one looked identical from the
+ * outside. This is the only function that talks to the SDK, so it is the only
+ * place that has to be instrumented to see all of it.
+ */
+function trace(fields: Record<string, string | number | undefined>): void {
+  const line = Object.entries(fields)
+    .filter(([, v]) => v !== undefined && v !== "")
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+  console.info(`[lemma:ai] ${line}`);
+}
+
+/**
+ * Serializes work onto a fixed number of slots.
+ *
+ * Authoring and verification are no longer separate phases with separate
+ * limits — they overlap and both fan out — so they have to draw from one pool.
+ * With a limit each they would burst to the sum of the two and spend the
+ * difference in 429 backoff, which costs more wall clock than the concurrency
+ * bought.
+ */
+export type CallPool = <T>(fn: () => Promise<T>) => Promise<T>;
+
+export function createCallPool(limit: number): CallPool {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    // Re-check on wake rather than trusting the handoff: releasing a slot and
+    // resuming the waiter are two turns of the event loop, and another caller
+    // can arrive in between.
+    while (active >= limit) {
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
 
 let client: GoogleGenAI | null = null;
 
@@ -129,6 +199,8 @@ export type ImagePart = {
 export type StructuredCall<T> = {
   /** Preference-ordered model chain; later entries are tried only on 429/503. */
   models: string[];
+  /** Names this call in the trace log — "author:mcq", "solve", "coach". */
+  label?: string;
   system: string;
   prompt: string;
   schema: ZodType<T>;
@@ -153,6 +225,7 @@ export type StructuredCall<T> = {
  */
 export async function callStructured<T>({
   models,
+  label = "call",
   system,
   prompt,
   schema,
@@ -162,8 +235,12 @@ export async function callStructured<T>({
   budgetMs = DEFAULT_BUDGET_MS,
 }: StructuredCall<T>): Promise<T | null> {
   const ai = getClient();
-  const deadline = Date.now() + budgetMs;
+  const startedAt = Date.now();
+  const deadline = startedAt + budgetMs;
+  const perAttemptMs = attemptCap(budgetMs);
+  const elapsed = () => Date.now() - startedAt;
   let lastError: unknown;
+  let calls = 0;
 
   // Images lead so the instruction that follows can refer back to them ("the
   // pages above"). A bare string stays a bare string — the text-only callers
@@ -176,6 +253,7 @@ export async function callStructured<T>({
     for (let attempt = 1; attempt <= ATTEMPTS_PER_MODEL; attempt++) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
+      calls++;
       try {
         const response = await ai.models.generateContent({
           model,
@@ -186,19 +264,45 @@ export async function callStructured<T>({
             responseJsonSchema: jsonSchemaFor(schema),
             maxOutputTokens,
             thinkingConfig: thinkingConfigFor(model, thinking),
-            abortSignal: AbortSignal.timeout(Math.min(remaining, MAX_ATTEMPT_MS)),
+            abortSignal: AbortSignal.timeout(Math.min(remaining, perAttemptMs)),
           },
         });
 
+        const usage = response.usageMetadata;
+        // `finishReason` is the tell for the failure that otherwise looks like a
+        // sulky model: a batch cut off at `maxOutputTokens` returns text that
+        // cannot parse, which is indistinguishable from garbage without it.
+        const finish = String(response.candidates?.[0]?.finishReason ?? "STOP");
+        const outcome = (result: string) =>
+          trace({
+            label,
+            model,
+            calls,
+            ms: elapsed(),
+            result,
+            finish: finish === "STOP" ? undefined : finish,
+            in: usage?.promptTokenCount,
+            out: usage?.candidatesTokenCount,
+            think: usage?.thoughtsTokenCount,
+          });
+
         const text = response.text;
-        if (!text) return null;
+        if (!text) {
+          outcome("empty");
+          return null;
+        }
         const parsed = schema.safeParse(JSON.parse(stripFence(text)));
+        outcome(parsed.success ? "ok" : "schema-mismatch");
         return parsed.success ? parsed.data : null;
       } catch (err) {
         // A bad request or unparseable response is this model's own problem —
         // another model would fail the same way. Only capacity errors fall through.
-        if (!isRetryable(err)) return null;
+        if (!isRetryable(err)) {
+          trace({ label, model, calls, ms: elapsed(), result: "rejected", error: errorText(err) });
+          return null;
+        }
         lastError = err;
+        trace({ label, model, calls, ms: elapsed(), result: "retryable", error: errorText(err) });
         if (attempt < ATTEMPTS_PER_MODEL) {
           await sleep(Math.min(attempt * 1500, Math.max(0, deadline - Date.now())));
         }
@@ -206,9 +310,16 @@ export async function callStructured<T>({
     }
   }
 
+  trace({ label, calls, ms: elapsed(), result: "exhausted", error: errorText(lastError) });
   throw new Error(
     `Every model was rate-limited, overloaded, or too slow within ${Math.round(budgetMs / 1000)}s ` +
       `(${models.join(", ")}). Last error: ` +
       (lastError instanceof Error ? lastError.message : String(lastError))
   );
+}
+
+/** One-line error text for the trace — the full stack is noise at this volume. */
+function errorText(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return JSON.stringify(message.slice(0, 120));
 }

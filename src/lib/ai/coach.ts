@@ -70,6 +70,7 @@ ${mistakes
 async function generate(snapshot: StatsSnapshot): Promise<CoachRead | null> {
   return callStructured({
     models: CHECKER_MODELS,
+    label: "coach",
     system: COACH_SYSTEM_PROMPT,
     prompt: buildPrompt(snapshot),
     schema: CoachReadSchema,
@@ -94,9 +95,55 @@ async function generateOrNull(snapshot: StatsSnapshot): Promise<CoachRead | null
   }
 }
 
+/** A cache lookup that fails just means writing the read again. */
+async function readCache(
+  userId: string,
+  scope: StatsScope
+): Promise<{ signature: string; read: CoachRead } | undefined> {
+  try {
+    const db = createServiceClient();
+    const { data } = await db
+      .from("coach_reads")
+      .select("signature, read")
+      .eq("user_id", userId)
+      .eq("scope", scope)
+      .limit(1);
+    return (data as { signature: string; read: CoachRead }[] | null)?.[0];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whatever read this student already has, without ever calling the model.
+ *
+ * This is what the *build* route takes, and the distinction is load-bearing.
+ * A coach read contributes exactly one thing to a build — `generator_directives`,
+ * appended to the computed ones — and `computedDirectives` in `coach-plan.ts` is
+ * written to stand on its own. Generating here would put a model call ahead of
+ * generation in the same 300s invocation, measured at 2s warm but 24s on the
+ * cold first call of a request, and every second of it comes out of
+ * `BUILD_BUDGET_MS` because that is counted from the start of the request.
+ *
+ * The signature is deliberately ignored. A read written a few attempts ago still
+ * describes this student, and the fresh snapshot — not this — is what picks the
+ * set's topics, level and formats. No read at all is the worse answer.
+ *
+ * The normal flow keeps this warm: `/stats` is where targeted builds are started
+ * from, and it generates the read in a Suspense boundary on the same render.
+ * A student who clicks a card before that resolves gets computed directives
+ * only, which is the fallback those directives exist for.
+ */
+export async function cachedCoachRead(
+  userId: string,
+  scope: StatsScope
+): Promise<CoachRead | null> {
+  return (await readCache(userId, scope))?.read ?? null;
+}
+
 /**
  * A read for this snapshot, from cache when the student hasn't practised since
- * it was written.
+ * it was written, and from the model otherwise.
  *
  * Below a handful of graded attempts there is no pattern to find and the model
  * will invent one, so don't ask.
@@ -108,26 +155,14 @@ export async function loadCoachRead(
 ): Promise<CoachRead | null> {
   if (snapshot.totals.answered < 4) return null;
 
-  const db = createServiceClient();
   const signature = coachSignature(snapshot);
-
-  // A cache lookup that fails just means writing the read again.
-  let cached: { signature: string; read: CoachRead } | undefined;
-  try {
-    const { data } = await db
-      .from("coach_reads")
-      .select("signature, read")
-      .eq("user_id", userId)
-      .eq("scope", scope)
-      .limit(1);
-    cached = (data as { signature: string; read: CoachRead }[] | null)?.[0];
-  } catch {
-    cached = undefined;
-  }
+  const cached = await readCache(userId, scope);
   if (cached?.signature === signature) return cached.read;
 
   const read = await generateOrNull(snapshot);
   if (!read) return null;
+
+  const db = createServiceClient();
 
   // A failed write costs a regeneration next time, nothing more.
   try {

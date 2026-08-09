@@ -247,6 +247,7 @@ async function askModelIfEquivalent(
 ): Promise<boolean> {
   const result = await callStructured({
     models: CHECKER_MODELS,
+    label: "equivalence",
     system: EQUIVALENCE_SYSTEM_PROMPT,
     prompt: `Reference answer (LaTeX): ${reference}${acceptableForms.length ? `\nAlso acceptable: ${acceptableForms.join(" ; ")}` : ""}\nStudent's answer: ${student}`,
     schema: EquivalenceResultSchema,
@@ -387,6 +388,7 @@ export async function wrongAnswerFeedback(
 
   return callStructured({
     models: CHECKER_MODELS,
+    label: "feedback",
     system: FEEDBACK_SYSTEM_PROMPT,
     prompt: `Problem: ${content.statement_latex}
 ${optionList ? `Options:\n${optionList.map((c) => `${c.id}) ${c.latex}`).join("\n")}` : ""}

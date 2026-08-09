@@ -4,9 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { buildProblemSet, type SetConfig } from "@/lib/sets";
 import { PROBLEM_FORMATS, PROBLEM_STYLES } from "@/lib/ai/schemas";
 import { loadStatsSnapshot, windowFor } from "@/lib/analytics";
-import { loadCoachRead } from "@/lib/ai/coach";
+import { cachedCoachRead } from "@/lib/ai/coach";
 import { loadLatestSession } from "@/lib/study-session";
 import { prescribe, PLAN_IDS } from "@/lib/coach-plan";
+import { ipAllowance } from "@/lib/limits";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -56,6 +57,14 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Invalid request" }, { status: 400 });
   }
 
+  // Ahead of the branch below, not next to the per-user cap inside
+  // `buildProblemSet`: a targeted build resolves a coach read first, which can
+  // spend 45s of model time before generation is even reached.
+  const networkAllowance = await ipAllowance("generatedSets", request.headers);
+  if (!networkAllowance.ok) {
+    return Response.json({ error: networkAllowance.message }, { status: 429 });
+  }
+
   let config: SetConfig;
   if (body.mode === "targeted") {
     // Targeted sets are the payoff for having a history, which guests don't keep.
@@ -67,8 +76,13 @@ export async function POST(request: NextRequest) {
     }
     const scope = body.scope;
     const session = scope === "session" ? await loadLatestSession(user.id) : null;
-    const snapshot = await loadStatsSnapshot(user.id, windowFor(scope, session));
-    const coach = await loadCoachRead(user.id, scope, snapshot);
+    // `cachedCoachRead` never calls the model and doesn't need the snapshot, so
+    // the two run together instead of queueing. Nothing before generation may
+    // block on a model here — see the note on `cachedCoachRead`.
+    const [snapshot, coach] = await Promise.all([
+      loadStatsSnapshot(user.id, windowFor(scope, session)),
+      cachedCoachRead(user.id, scope),
+    ]);
     const chosen = prescribe(snapshot, coach).find((p) => p.id === body.plan);
     if (!chosen) {
       return Response.json(
@@ -117,7 +131,9 @@ export async function POST(request: NextRequest) {
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
+      // `no-transform` is the load-bearing half: it stops a proxy buffering the
+      // stream, which would hold every build event back until the set finished.
+      "Cache-Control": "no-store, no-transform",
       Connection: "keep-alive",
     },
   });
