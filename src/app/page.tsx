@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 const STEPS = [
   {
     title: "Choose",
-    body: "A whole course, a single unit, or six specific topics. Algebra 1 through AP Calculus BC, plus competition math. Set the difficulty, the style, and the answer format.",
+    body: "A whole unit, six specific topics, or a mix drawn from several courses at once. Algebra 1 through AP Calculus BC, plus competition math. Set the difficulty, the style, and the answer format.",
   },
   {
     title: "Verify",

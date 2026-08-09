@@ -1,9 +1,10 @@
 "use client";
 
-import type { AuthError } from "@supabase/supabase-js";
+import type { AuthError, SupabaseClient, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { describeSignInError } from "@/lib/auth-errors";
 import { solveCaptcha } from "@/lib/captcha";
+import { affirmationRecord, confirmAge, hasAffirmedAge } from "@/lib/age-gate";
 
 /** Get the current session's user, creating an anonymous account if none exists. */
 export async function ensureUser() {
@@ -11,7 +12,15 @@ export async function ensureUser() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (user) return user;
+  if (user) {
+    await backfillAffirmation(supabase, user);
+    return user;
+  }
+
+  // Before the CAPTCHA, not after: someone who is too young, or who declines,
+  // should not have been announced to Cloudflare on the way to being turned
+  // away. This throws to abort, so nothing downstream runs.
+  await confirmAge();
 
   // Only a brand-new guest needs a token, so this runs once per browser rather
   // than on every action. Returns null unless Turnstile is configured, in which
@@ -22,7 +31,43 @@ export async function ensureUser() {
     captchaToken ? { options: { captchaToken } } : undefined
   );
   if (error) throw new Error(guestSessionFailure(error));
+  await storeAffirmation(supabase);
   return data.user!;
+}
+
+/**
+ * Move the declaration from browser storage onto the account.
+ *
+ * The account is the record that matters — it survives a cleared browser, and
+ * it is what an actual enquiry about a specific user would be answered from.
+ * `localStorage` is only the cache that stops the dialog reappearing.
+ *
+ * Failure is swallowed on purpose. Losing the record is bad; losing the click
+ * that the student actually made — a set they were part-way through building —
+ * because a metadata write failed is worse, and they have already answered.
+ */
+async function storeAffirmation(supabase: SupabaseClient): Promise<void> {
+  try {
+    await supabase.auth.updateUser({ data: affirmationRecord() });
+  } catch {
+    // See above.
+  }
+}
+
+/**
+ * Write the declaration onto an account that predates it.
+ *
+ * Two cases land here, and neither can write it at the moment it is given: a
+ * user who signed in with Google directly is redirected away mid-flow and only
+ * has a session once they are back, and everyone whose account was created
+ * before this check existed has no record at all. Returns without touching the
+ * network in every other case, which is almost all of them, since this sits on
+ * the path of every guest action in the app.
+ */
+async function backfillAffirmation(supabase: SupabaseClient, user: User): Promise<void> {
+  if (user.user_metadata?.age_affirmed_at) return;
+  if (!hasAffirmedAge()) return;
+  await storeAffirmation(supabase);
 }
 
 /**
@@ -69,6 +114,17 @@ export async function signInWithGoogle(next = "/") {
     if (error) throw signInFailure(error);
     return;
   }
+
+  // Only this branch asks. The one above is an existing guest upgrading in
+  // place, and they answered when their session was created — putting the
+  // dialog in front of them again would be asking the same person twice about
+  // the same account.
+  //
+  // Nothing is written here because the redirect below leaves the page before
+  // there is a session to write to; `backfillAffirmation` picks it up on the
+  // way back.
+  await confirmAge();
+
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo },

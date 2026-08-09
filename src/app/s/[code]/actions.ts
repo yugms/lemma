@@ -17,7 +17,7 @@ export async function addSharedSet(code: string): Promise<{ error?: string }> {
   const user = await getCurrentUser();
   if (!user) return { error: "Couldn't start a session — reload and try again." };
 
-  const result = await copySharedSet(user.id, code);
+  const result = await copySharedSet(user.id, user.is_anonymous ?? false, code);
   if ("error" in result) return result;
 
   revalidatePath("/sets");

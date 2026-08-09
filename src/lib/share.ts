@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
-import { capFor, startOfToday } from "@/lib/limits";
+import { capFor, CAP_CHECK_FAILED, startOfToday } from "@/lib/limits";
 import { ITEM_SELECT, sanitizeItems, type SetConfig, type SetMeta } from "@/lib/sets";
 import { newShareCode, normalizeShareCode } from "@/lib/share-code";
 import type { SanitizedProblem } from "@/lib/ai/schemas";
@@ -70,6 +70,13 @@ export async function loadSharedSet(code: string): Promise<SharedSet | null> {
  */
 export async function copySharedSet(
   userId: string,
+  /**
+   * Passed in rather than assumed. This is the one capped path a guest reaches
+   * by design — a share link that demanded an account would be useless to most
+   * of the people it gets sent to — so hardcoding the member cap here quietly
+   * exempted exactly the callers most likely to be abusing it.
+   */
+  isAnonymous: boolean,
   code: string
 ): Promise<{ setId: string } | { error: string }> {
   const shared = await loadSharedSet(code);
@@ -79,14 +86,15 @@ export async function copySharedSet(
 
   const db = createServiceClient();
 
-  const { count } = await db
+  const { count, error: countErr } = await db
     .from("problem_sets")
     .select("id", { count: "exact", head: true })
     .eq("owner_id", userId)
     .not("config->>copiedFrom", "is", null)
     .gte("created_at", startOfToday().toISOString());
+  if (countErr) return { error: CAP_CHECK_FAILED };
   // Copies cost nothing to make, so they are bounded on their own terms.
-  const copyCap = capFor("sharedCopies", false);
+  const copyCap = capFor("sharedCopies", isAnonymous);
   if ((count ?? 0) >= copyCap) {
     return { error: `That's ${copyCap} shared sets today — work through one first.` };
   }

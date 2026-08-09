@@ -1,10 +1,25 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { contentSecurityPolicy, newNonce } from "../csp";
 import { siteUrl, turnstileSiteKey } from "../env";
 import type { AccountSummary } from "../account";
-import { capFor, DAILY_LIMITS, startOfToday, type LimitKind } from "../limits";
+import {
+  capFor,
+  clientIp,
+  DAILY_LIMITS,
+  IP_LIMITS,
+  startOfToday,
+  type LimitKind,
+} from "../limits";
+import { authCookieOptions } from "../supabase/cookie-options";
+import {
+  affirmationRecord,
+  MIN_AGE,
+  MIN_AGE_STRICT,
+  parseStoredAffirmation,
+} from "../age-gate";
 import { describeSignInError, SIGN_IN_FALLBACK } from "../auth-errors";
 import { newShareCode, normalizeShareCode, SHARE_CODE_ALPHABET } from "../share-code";
+import nextConfig from "../../../next.config";
 
 /**
  * The pieces that only matter once real people are using this: the security
@@ -211,6 +226,130 @@ describe("daily limits", () => {
     const since = startOfToday();
     expect([since.getHours(), since.getMinutes(), since.getSeconds()]).toEqual([0, 0, 0]);
     expect(since.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+});
+
+describe("per-network limits", () => {
+  it("leaves room for a shared network on every bucket", () => {
+    // The failure mode these are tuned against is a classroom or a library
+    // behind one address, where thirty students look like one caller. A burst
+    // allowance at or below the per-user daily cap lets one student spend the
+    // whole room's, and to everyone else the site just appears broken — which
+    // gets reported as a bug rather than as a limit, if it gets reported at all.
+    for (const [kind, limit] of Object.entries(IP_LIMITS)) {
+      const perUserDaily = DAILY_LIMITS[kind as keyof typeof IP_LIMITS].member;
+      expect(limit.burst.max, `${kind} burst`).toBeGreaterThanOrEqual(perUserDaily * 1.5);
+      expect(limit.day.max, `${kind} day`).toBeGreaterThan(limit.burst.max);
+      expect(limit.burst.seconds, `${kind} burst window`).toBeLessThan(limit.day.seconds);
+    }
+  });
+
+  it("reads the edge-set header in preference to the client-set one", () => {
+    // `x-forwarded-for` is whatever the caller sent until a proxy overwrites
+    // it; `x-vercel-forwarded-for` is stamped at the edge. Preferring the
+    // wrong one would let a caller pick its own bucket, and therefore a fresh
+    // allowance per request.
+    const headers = new Headers({
+      "x-vercel-forwarded-for": "203.0.113.7",
+      "x-forwarded-for": "198.51.100.1",
+    });
+    expect(clientIp(headers)).toBe("203.0.113.7");
+  });
+
+  it("takes only the first hop, and nothing when there is no header", () => {
+    // The tail of an XFF chain is proxies, not callers — counting a proxy as
+    // its own subject would give every request through it a clean slate.
+    expect(clientIp(new Headers({ "x-forwarded-for": "203.0.113.7, 70.41.3.18" }))).toBe(
+      "203.0.113.7"
+    );
+    expect(clientIp(new Headers({ "x-forwarded-for": "  203.0.113.7  " }))).toBe("203.0.113.7");
+    // Local development has neither header; `ipAllowance` reads null as "skip".
+    expect(clientIp(new Headers())).toBeNull();
+    expect(clientIp(new Headers({ "x-forwarded-for": "" }))).toBeNull();
+  });
+});
+
+describe("session cookie attributes", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("is marked Secure in production", () => {
+    // @supabase/ssr's DEFAULT_COOKIE_OPTIONS has no `secure` key at all, so
+    // omitting cookieOptions ships the session without the attribute.
+    vi.stubEnv("NODE_ENV", "production");
+    expect(authCookieOptions().secure).toBe(true);
+  });
+
+  it("is not Secure outside production", () => {
+    // A production build served over plain http from a LAN address — testing
+    // the phone camera against `npm start` — would otherwise have every cookie
+    // write silently dropped.
+    vi.stubEnv("NODE_ENV", "development");
+    expect(authCookieOptions().secure).toBe(false);
+  });
+
+  it("keeps the three attributes that are load-bearing elsewhere", () => {
+    const options = authCookieOptions();
+    // Not `strict`: Google returns through a cross-site top-level navigation,
+    // and `strict` withholds the cookie on exactly that, so the PKCE verifier
+    // would be missing and every sign-in would fail.
+    expect(options.sameSite).toBe("lax");
+    // Cannot be true — the browser client reads the session from
+    // document.cookie, and an HttpOnly cookie breaks that silently.
+    expect(options.httpOnly).toBe(false);
+    // Deliberately long. A guest's identity lives only here, so an expiry is
+    // not a shorter attack window, it is permanent loss of their work.
+    expect(options.maxAge).toBeGreaterThan(300 * 24 * 60 * 60);
+  });
+});
+
+describe("static security headers", () => {
+  it("sets the ones a CSP cannot express", async () => {
+    const headers = (await nextConfig.headers!()).find((h) => h.source === "/:path*")!.headers;
+    const value = (key: string) => headers.find((h) => h.key === key)?.value ?? "";
+
+    expect(value("Strict-Transport-Security")).toContain("max-age=");
+    expect(value("X-Content-Type-Options")).toBe("nosniff");
+    expect(value("X-Frame-Options")).toBe("DENY");
+    expect(value("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+    // Safe only while Google sign-in is a full-page redirect. Adding
+    // `skipBrowserRedirect` would make it a popup and this would break it.
+    expect(value("Cross-Origin-Opener-Policy")).toBe("same-origin");
+  });
+
+  it("keeps per-user API responses out of shared caches", async () => {
+    // Every route under /api returns something belonging to one account — a
+    // grade, a set, a scan result — and none of them said so themselves.
+    const api = (await nextConfig.headers!()).find((h) => h.source === "/api/:path*")!;
+    expect(api.headers.find((h) => h.key === "Cache-Control")?.value).toBe("no-store");
+  });
+});
+
+describe("age declaration", () => {
+  it("accepts only a record it wrote itself", () => {
+    // localStorage is writable by anything on the origin and outlives deploys,
+    // so anything unrecognised has to mean "ask again" rather than "assume yes".
+    expect(parseStoredAffirmation(JSON.stringify({ at: "2026-08-04T10:00:00.000Z" }))).toBe(true);
+    expect(parseStoredAffirmation(null)).toBe(false);
+    expect(parseStoredAffirmation("")).toBe(false);
+    expect(parseStoredAffirmation("true")).toBe(false);
+    expect(parseStoredAffirmation("{not json")).toBe(false);
+    expect(parseStoredAffirmation(JSON.stringify({ at: "yesterday" }))).toBe(false);
+    expect(parseStoredAffirmation(JSON.stringify({ at: 1754300000000 }))).toBe(false);
+    expect(parseStoredAffirmation(JSON.stringify({}))).toBe(false);
+  });
+
+  it("records when it was given, and no date of birth", () => {
+    const record = affirmationRecord(new Date("2026-08-04T10:00:00.000Z"));
+    expect(record.age_affirmed_at).toBe("2026-08-04T10:00:00.000Z");
+    expect(record.age_minimum_declared).toBe(MIN_AGE);
+    // The privacy policy says a birth date is neither asked for nor stored, so
+    // this object is what has to stay true to that.
+    expect(Object.keys(record).sort()).toEqual(["age_affirmed_at", "age_minimum_declared"]);
+  });
+
+  it("states a minimum that matches the published policy", () => {
+    expect(MIN_AGE).toBe(13);
+    expect(MIN_AGE_STRICT).toBe(16);
   });
 });
 

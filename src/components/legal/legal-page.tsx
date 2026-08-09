@@ -19,7 +19,7 @@ export const LEGAL_CONTACT = "yugms7@gmail.com";
  * reader has for whether the terms moved under them. It is also exactly the
  * kind of render-time clock call `react-hooks/purity` exists to reject.
  */
-export const LEGAL_LAST_UPDATED = "1 August 2026";
+export const LEGAL_LAST_UPDATED = "4 August 2026";
 
 export function LegalPage({
   eyebrow,
