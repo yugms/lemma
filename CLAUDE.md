@@ -41,9 +41,21 @@ There is no local database. Schema lives in the Supabase project's migration his
 
 1. **Pool reuse** — verified `problems` rows matching topic/style/format/difficulty, excluding anything the user attempted in the last 30 days, ordered by `times_served` ascending, then bumped via the `bump_times_served` RPC. Capped at `POOL_FRACTION` (half) of the set.
 2. **Templates** — deterministic, free, instant (see below). Takes at most half the remaining slots when non-drill styles were also requested.
-3. **AI generate → verify → repair** — batched authoring, then per-problem verification at `AI_CONCURRENCY`. At most two rounds (`regenAttempted`).
+3. **AI generate → verify → repair** — batched authoring and per-problem verification, overlapped. At most two rounds (`regenAttempted`).
 
 Two budgets exist because delivering a short set beats delivering nothing: `buildDeadline` (230s) stops *starting* new AI rounds before the route's 300s limit, and generation capacity failures break out of the loop with whatever was already gathered instead of throwing.
+
+**Step 3 is where the wall clock goes, and it is one pipeline, not two phases.** Authoring is by far the most expensive thing the app does — a batch runs 30-60s against a ~1s independent solve — so every authoring call for a set is in flight at once (`generateProblems` fans out over generation kinds and `PROBLEMS_PER_CALL` chunks), and `onBatch` starts verifying each batch the moment it lands rather than waiting for the slowest kind. Three consequences worth knowing before touching it:
+
+- **Authoring and verification share one `createCallPool(AI_CONCURRENCY)`**, created once per build in `buildProblemSet`. A limit each would burst to the sum of the two and spend the difference in 429 backoff, which costs more than the concurrency buys.
+- **Concurrent batches cannot see each other's output**, so the sequential `avoid`-list accumulation that used to prevent repeats is gone. `statementKey` dedup in `generateProblems` replaces it; it is whitespace-and-case only, because it only has to catch the model landing on the same problem twice.
+- **A capacity failure is per-call.** `generateProblems` collects with `allSettled` and rethrows only when nothing at all was produced, so one exhausted model chain no longer discards the batches that landed beside it.
+
+`PROBLEMS_PER_CALL` looks like a latency dial and is not one. Measured, twelve problems took 58s at six per call and 66s at three: a call spends 3.5-7k thinking tokens planning the batch almost regardless of its size, so splitting further just multiplies that overhead and doubles the burst the free tier answers with 503s.
+
+Progress is emitted from inside those parallel callbacks through `asyncQueue` (`src/lib/async-queue.ts`), because an async generator cannot `yield` from a callback. Without it the meter can only move between phases — which is exactly the stretch where it used to read `0/8` for minutes on a targeted build that skips both the pool and templates.
+
+**Nothing on the route's path to `buildProblemSet` may call a model.** `BUILD_BUDGET_MS` is counted from `requestStartedAt`, so a call made in the preamble is subtracted from generation twice over — once in wall clock, once in budget. This is why the targeted branch takes `cachedCoachRead` rather than `loadCoachRead`: the read only ever contributes `generator_directives`, which sharpen the computed directives rather than replacing them, and generating it cost a measured 2s warm but 24s on a request's cold first call. `/stats` is where targeted builds start from and it generates the read in a Suspense boundary on the same render, so the cache is warm by the time a card is clicked; a student who beats it gets computed directives only, which is the fallback those exist for. `cachedCoachRead` also ignores the cache signature and needs no snapshot, which is what lets it run in `Promise.all` with `loadStatsSnapshot` instead of behind it.
 
 ### Every model call goes through one function
 
@@ -53,6 +65,8 @@ Two budgets exist because delivering a short set beats delivering nothing: `buil
 - **Throws** only when the entire model chain is rate-limited/overloaded/timed out, which is worth surfacing to the student.
 - Models are preference-ordered chains (`GENERATOR_MODELS`, `CHECKER_MODELS`), env-overridable. Free-tier Flash models return 503 in bursts, so each role falls through to an older sibling. Retryability is classified by `isRetryable()`; only capacity errors fall through to the next model.
 - Gemini 3.x takes `thinkingLevel`, 2.5 takes `thinkingBudget` — `thinkingConfigFor()` sends only what a given model understands.
+- **Every call traces one line** — `[lemma:ai] label=author:mcq model=… ms=… result=ok in=… out=… think=…`, plus `[lemma:build] phase=…` per build phase. This is the only place that sees the SDK, so it is the only place that has to be instrumented to see all of it. `label` is what makes a trace readable; set it on any new call site. Nothing else records model latency, so a slow build and a stalled one are indistinguishable without this.
+- **The per-attempt timeout is derived from `budgetMs`, not fixed** (`attemptCap`, floored at `MIN_ATTEMPT_MS`). A flat 60s ceiling under the generator's 150s budget aborted batches that were still being written; an abort is classified retryable, so the call then spent its whole budget on retries that were always going to be cut off at the same point. Any new caller with a generous budget inherits the derivation — don't reintroduce a constant.
 - Optional `images` make the call multimodal (`contents` becomes a parts array). Every model in both chains already reads images, so scanning needs no separate chain — and the one-choke-point rule is why image support lives here rather than in the scanning code.
 
 **Gemini JSON Schema constraint:** `$ref` is only supported in non-required properties, so every schema must be fully inlined (`z.toJSONSchema(..., { reused: "inline" })`). A regression here fails at request time with an opaque 400, so `provider-schema.test.ts` asserts no `$ref`/`$defs`/`$schema` in any schema sent to a model. This is also why generation requests one *generation kind* at a time with a flat schema (`batchSchemaFor`, `repairSchemaFor`) rather than the discriminated union.

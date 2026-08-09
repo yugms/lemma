@@ -65,6 +65,11 @@ export default function TermsPage() {
           and the United Kingdom. If you are under the age of majority where you live,
           you should have a parent or guardian&apos;s permission to use it.
         </p>
+        <p>
+          You are asked to confirm this once, before an account is created. Confirming it
+          untruthfully is a breach of these terms, and an account found to belong to
+          someone under the minimum age will be deleted along with everything on it.
+        </p>
       </Section>
 
       <Section id="acceptable" heading="Acceptable use">

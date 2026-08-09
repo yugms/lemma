@@ -952,6 +952,63 @@
    screen at every visitor who never sees a challenge, which is most of
    them.                                                                  */
 
+/* Age declaration, appended to <body> by src/lib/age-gate.ts. Sits above the
+   captcha host: it is asked first, and the two never overlap. */
+.age-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: color-mix(in oklab, var(--paper) 78%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.age-gate-panel {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 27rem;
+  width: 100%;
+  padding: 1.5rem;
+}
+
+.age-gate-title {
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.age-gate-body {
+  color: var(--fg-muted);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.age-gate-links {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.875rem;
+}
+
+.age-gate-links a {
+  color: var(--fg-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.age-gate-links a:hover {
+  color: var(--fg);
+}
+
+.age-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
 .captcha-host {
   position: fixed;
   left: 50%;

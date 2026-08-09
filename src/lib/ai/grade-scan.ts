@@ -102,6 +102,7 @@ export async function gradeScan(
 
   return callStructured({
     models: CHECKER_MODELS,
+    label: "scan",
     system: SCAN_SYSTEM_PROMPT,
     prompt: `The pages above are one student's handwritten work on the following ${problems.length} problem${
       problems.length === 1 ? "" : "s"

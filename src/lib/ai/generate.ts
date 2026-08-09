@@ -1,4 +1,9 @@
-import { callStructured, GENERATOR_MODELS } from "@/lib/ai/provider";
+import {
+  callStructured,
+  GENERATOR_MODELS,
+  PROBLEMS_PER_CALL,
+  type CallPool,
+} from "@/lib/ai/provider";
 import { GENERATOR_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import {
   batchSchemaFor,
@@ -36,7 +41,7 @@ export type GenerationRequest = {
   focus?: string[];
 };
 
-const MAX_PER_CALL = 6;
+const MAX_PER_CALL = PROBLEMS_PER_CALL;
 
 const FORMAT_BRIEF: Record<GenerationKind, string> = {
   mcq: "multiple choice: 4-5 choices, exactly one correct, every distractor traceable to a specific misconception",
@@ -120,41 +125,95 @@ function splitAcrossKinds(count: number, formats: ProblemFormat[]): Map<Generati
 }
 
 /**
- * Generate up to `req.count` problems, one batched call per format (and per
- * MAX_PER_CALL chunk within a format). Returns whatever came back validated —
+ * Two statements count as the same problem when this matches.
+ *
+ * Deliberately blunt — whitespace and case only. The batches used to be written
+ * one after another, so each could be told what the previous ones had already
+ * produced; written together, none of them can see the others, and this is what
+ * replaces that. It only has to catch the model landing on the same problem
+ * twice, which is a near-identical string, not a paraphrase.
+ */
+const statementKey = (statement: string) => statement.replace(/\s+/g, " ").trim().toLowerCase();
+
+export type GenerationOptions = {
+  /** Shared with verification so one build cannot burst past the RPM limit. */
+  pool?: CallPool;
+  /**
+   * Fired as each batch validates. Verification starts on it immediately rather
+   * than waiting for the slowest kind to finish authoring.
+   */
+  onBatch?: (problems: TaggedProblem[]) => void;
+};
+
+/**
+ * Generate up to `req.count` problems: one call per format, per MAX_PER_CALL
+ * chunk, all in flight together. Returns whatever came back validated —
  * shortfalls are the caller's to deal with.
  */
 export async function generateProblems(
-  req: GenerationRequest
+  req: GenerationRequest,
+  { pool = (fn) => fn(), onBatch }: GenerationOptions = {}
 ): Promise<TaggedProblem[]> {
-  const results: TaggedProblem[] = [];
-
+  // One task per call rather than per kind. A kind wanting more than
+  // MAX_PER_CALL used to write its chunks back to back even though nothing but
+  // the avoid list ever linked them.
+  const tasks: { kind: GenerationKind; n: number }[] = [];
   for (const [kind, wanted] of splitAcrossKinds(req.count, req.formats)) {
-    let remaining = wanted;
-    while (remaining > 0) {
-      const n = Math.min(remaining, MAX_PER_CALL);
-      const batch = await callStructured({
-        models: GENERATOR_MODELS,
-        system: GENERATOR_SYSTEM_PROMPT,
-        prompt: buildUserMessage(req, kind, n, [
-          ...req.avoid,
-          ...results.map((p) => p.statement_latex),
-        ]),
-        schema: batchSchemaFor(kind),
-        maxOutputTokens: 30000,
-        thinking: "medium",
-        budgetMs: 150_000, // authoring a batch is the longest call we make
-      });
-      remaining -= n;
-      if (!batch) break; // model gave up on this kind; keep the other kinds
-      // Clamp rather than discard: a bogus index is a tagging slip, not a bad problem.
-      results.push(
-        ...batch.problems.map((p) => ({
-          ...p,
-          topic_index: Math.min(Math.max(p.topic_index, 0), req.topics.length - 1),
-        }))
-      );
+    if (wanted <= 0) continue;
+    // Balanced, not greedy. Taking MAX_PER_CALL at a time leaves a remainder
+    // call authoring a single problem, and a call's cost is mostly fixed — the
+    // model plans the batch either way — so four problems go out as 2+2 rather
+    // than 3+1.
+    const chunks = Math.ceil(wanted / MAX_PER_CALL);
+    for (let i = 0; i < chunks; i++) {
+      tasks.push({ kind, n: Math.floor(wanted / chunks) + (i < wanted % chunks ? 1 : 0) });
     }
+  }
+
+  const results: TaggedProblem[] = [];
+  const seen = new Set(req.avoid.map(statementKey));
+
+  const outcomes = await Promise.allSettled(
+    tasks.map(({ kind, n }) =>
+      pool(async () => {
+        const batch = await callStructured({
+          models: GENERATOR_MODELS,
+          label: `author:${kind}`,
+          system: GENERATOR_SYSTEM_PROMPT,
+          prompt: buildUserMessage(req, kind, n, req.avoid),
+          schema: batchSchemaFor(kind),
+          maxOutputTokens: 30000,
+          thinking: "medium",
+          budgetMs: 150_000, // authoring a batch is the longest call we make
+        });
+        if (!batch) return; // model gave up on this chunk; keep the others
+
+        const fresh = batch.problems
+          // Clamp rather than discard: a bogus index is a tagging slip, not a bad problem.
+          .map((p) => ({
+            ...p,
+            topic_index: Math.min(Math.max(p.topic_index, 0), req.topics.length - 1),
+          }))
+          .filter((p) => {
+            const key = statementKey(p.statement_latex);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+
+        results.push(...fresh);
+        if (fresh.length > 0) onBatch?.(fresh);
+      })
+    )
+  );
+
+  // A capacity failure is per-call now. One kind exhausting the model chain used
+  // to abort the request, which was right when it was the only call in flight;
+  // with the rest running alongside it, they have usually landed something worth
+  // keeping. Surface the failure only when there is nothing to keep.
+  if (results.length === 0) {
+    const failed = outcomes.find((o) => o.status === "rejected");
+    if (failed) throw failed.reason;
   }
 
   return results;
@@ -167,6 +226,7 @@ export async function repairProblem(
 ): Promise<GeneratedProblem | null> {
   const result = await callStructured({
     models: GENERATOR_MODELS,
+    label: `repair:${kindOf(problem)}`,
     system: REPAIR_SYSTEM_PROMPT,
     prompt: `Problem (as authored, JSON):
 ${JSON.stringify(problem, null, 2)}

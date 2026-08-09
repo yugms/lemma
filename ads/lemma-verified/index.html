@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Lemma — Every problem independently verified</title>
+
+    <!--
+      HyperFrames composition — Lemma advertisement. 19.5s @ 1920x1080.
+
+      STORY (the product's own differentiator is the ad):
+        S1  0.00 – 4.00   Hook — anything can generate a math problem; it is wrong
+        S2  4.00 – 8.20   01 Choose  — topic / difficulty / style / format
+        S3  8.20 – 13.40  02 Verify  — the climax; re-solved with the key withheld
+        S4  13.40 – 16.40 03 Practice — instant grading, worked solutions
+        S5  16.40 – 19.50 CTA — wordmark, promise, URL
+
+      SEAMS: vertical push (0.5s / 0.45s) on the three step seams — the editorial
+      page-turn IS the 01 -> 02 -> 03 progression — then a blur crossfade into the
+      outro so the piece exhales. One primary + one wind-down accent, per doctrine.
+
+      Palette and type are lifted from src/app/globals.css and layout.tsx, not
+      invented: oxblood #7a1f2b on warm paper #faf7f0, Fraunces display over Geist.
+      The two reds stay separated — the accent never enters a graded answer region,
+      and every correct/incorrect state carries a mark AND a word, never colour alone.
+    -->
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+
+    <style>
+      :root {
+        --paper: #faf7f0;
+        --surface: #fffdf8;
+        --raised: #ffffff;
+        --sunk: #f2ede2;
+
+        --fg: #17130f;
+        --fg-muted: #5c5449;
+        --fg-faint: #6f675a;
+
+        --line: #e6dfd0;
+        --line-strong: #d3c9b4;
+
+        --accent: #7a1f2b;
+        --accent-on: #fdf6f2;
+        --accent-line: #dcc0bd;
+        --accent-wash: #f7eeea;
+
+        --ok: #1f6b3a;
+        --ok-line: #b9d6c1;
+        --ok-wash: #f0f6f0;
+
+        --bad: #be3a22;
+        --bad-line: #eec7ba;
+        --bad-wash: #fcf1eb;
+
+        --font-display: "Fraunces", ui-serif, Georgia, serif;
+        --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+        /* No SFMono-Regular in the stack: it has no deterministic mapping in the
+           render container, so it only ever produced a compiler warning. */
+        --font-mono: "Geist Mono", ui-monospace, monospace;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--paper);
+        color: var(--fg);
+        font-family: var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── Scene scaffold ────────────────────────────────────────────
+         Standalone composition: no `clip` class, only #root carries the
+         composition data-*. Scene 1 is visible; 2+ start transparent and
+         GSAP reveals them at their seam. */
+      /* Scenes are pushed fully off-canvas at their seam and cross each other
+         while they travel — both are declared intentional on the scene divs so
+         the layout pass reads the seam as choreography, not as a bug. */
+      .scene {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--paper);
+        will-change: transform, opacity;
+      }
+      #scene1 { z-index: 1; }
+      #scene2 { z-index: 2; opacity: 0; }
+      #scene3 { z-index: 3; opacity: 0; }
+      #scene4 { z-index: 4; opacity: 0; }
+      #scene5 { z-index: 5; opacity: 0; }
+
+      .frame {
+        position: absolute;
+        inset: 0;
+        padding: 0 120px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      /* ── Type ─────────────────────────────────────────────────── */
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 19px;
+        font-weight: 500;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--accent);
+        opacity: 0;
+      }
+      .display {
+        font-family: var(--font-display);
+        font-weight: 600;
+        line-height: 1.02;
+        letter-spacing: -0.02em;
+      }
+      .mono {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Waterfall members start hidden; opacity is set binary at entry. */
+      .wf {
+        opacity: 0;
+        display: block;
+        will-change: transform;
+      }
+      .wf-i {
+        opacity: 0;
+        display: inline-block;
+        will-change: transform;
+      }
+
+      /* ── Step header (01 / Choose) ────────────────────────────── */
+      .step-head {
+        display: flex;
+        align-items: baseline;
+        gap: 28px;
+      }
+      .step-num {
+        font-family: var(--font-mono);
+        font-size: 22px;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        color: var(--accent);
+      }
+      .step-name {
+        font-family: var(--font-display);
+        font-size: 62px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .step-rule {
+        flex: 1;
+        height: 1px;
+        background: var(--line-strong);
+        transform: scaleX(0);
+        transform-origin: left center;
+        will-change: transform;
+      }
+
+      /* ── Panels ───────────────────────────────────────────────── */
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 1px 2px rgba(28, 20, 10, 0.04), 0 12px 32px rgba(28, 20, 10, 0.05);
+        will-change: transform, opacity;
+        opacity: 0;
+      }
+      .panel-label {
+        font-family: var(--font-mono);
+        font-size: 15px;
+        font-weight: 500;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+      }
+      .rule {
+        height: 1px;
+        background: var(--line);
+      }
+
+      /* ── Chips ────────────────────────────────────────────────── */
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        height: 52px;
+        padding: 0 22px;
+        border-radius: 999px;
+        border: 1px solid var(--line-strong);
+        background: var(--sunk);
+        color: var(--fg-muted);
+        font-size: 21px;
+        font-weight: 500;
+        white-space: nowrap;
+        will-change: transform;
+      }
+
+      .btn-accent {
+        display: inline-flex;
+        align-items: center;
+        gap: 14px;
+        height: 74px;
+        padding: 0 40px;
+        border-radius: 14px;
+        background: var(--accent);
+        color: var(--accent-on);
+        font-size: 25px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        transform-origin: center center;
+        will-change: transform;
+        opacity: 0;
+      }
+
+      /* ── Badges (colour is never the only signal) ─────────────── */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        height: 46px;
+        padding: 0 20px;
+        border-radius: 999px;
+        font-family: var(--font-mono);
+        font-size: 18px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        transform-origin: center center;
+        will-change: transform;
+        opacity: 0;
+      }
+      .badge-bad {
+        background: var(--bad-wash);
+        border: 1px solid var(--bad-line);
+        color: var(--bad);
+      }
+      .badge-ok {
+        background: var(--ok-wash);
+        border: 1px solid var(--ok-line);
+        color: var(--ok);
+      }
+
+      .math {
+        font-family: var(--font-mono);
+        font-size: 30px;
+        letter-spacing: 0.01em;
+      }
+
+      /* ── SVG stroke draws — pathLength=1 removes any DOM measurement,
+         which a multi-scene composition cannot rely on anyway. ───── */
+      .draw {
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 1;
+      }
+
+      /* ══ SCENE 1 ══════════════════════════════════════════════ */
+      .s1-grid {
+        display: flex;
+        align-items: center;
+        gap: 90px;
+      }
+      /* 930 + 90 + 660 = 1680, the frame width inside its 120px gutters. The
+         left column is sized so "Anything can generate" sets on ONE line — each
+         headline span is a waterfall member, and a mid-span wrap would split one
+         arrival across two lines that then whip in together. */
+      .s1-left { width: 930px; flex: none; }
+      .s1-right { width: 660px; flex: none; }
+      .s1-h {
+        font-size: 80px;
+        color: var(--fg);
+      }
+      .s1-kicker {
+        font-family: var(--font-display);
+        font-size: 44px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        color: var(--accent);
+      }
+      .s1-card { padding: 40px 44px 44px; }
+      .s1-answer-wrap {
+        position: relative;
+        display: inline-block;
+      }
+      .s1-strike {
+        position: absolute;
+        left: -10px;
+        top: 50%;
+        margin-top: -7px;
+        width: 316px;
+        height: 14px;
+        overflow: visible;
+      }
+
+      /* ══ SCENE 2 ══════════════════════════════════════════════ */
+      .s2-grid {
+        display: flex;
+        gap: 80px;
+        align-items: flex-start;
+      }
+      .s2-builder { width: 980px; flex: none; padding: 38px 40px 42px; }
+      .s2-spec { width: 620px; flex: none; padding: 36px 38px; }
+      .s2-row + .s2-row { margin-top: 26px; }
+      .s2-row-label {
+        font-family: var(--font-mono);
+        font-size: 15px;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        margin-bottom: 13px;
+      }
+      .s2-chips { display: flex; gap: 12px; flex-wrap: nowrap; }
+      .s2-spec-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 20px;
+        padding: 17px 0;
+        opacity: 0;
+        will-change: transform;
+      }
+      .s2-spec-k {
+        font-family: var(--font-mono);
+        font-size: 16px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+      }
+      .s2-spec-v {
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--fg);
+        text-align: right;
+      }
+
+      /* ══ SCENE 3 ══════════════════════════════════════════════ */
+      /* flex-start, not stretch: the solver panel is taller because it did more
+         work, and that asymmetry is the argument the scene is making. */
+      .s3-grid {
+        display: flex;
+        gap: 120px;
+        align-items: flex-start;
+        position: relative;
+      }
+      .s3-solved {
+        margin-top: 22px;
+        opacity: 0;
+        will-change: transform;
+      }
+      .s3-panel { width: 780px; flex: none; padding: 34px 36px 38px; }
+      .s3-field {
+        margin-top: 20px;
+        padding: 20px 24px;
+        border-radius: 12px;
+        background: var(--sunk);
+        border: 1px solid var(--line);
+        position: relative;
+        overflow: hidden;
+      }
+      /* The bar covers the ANSWER only — the "Answer key" label above it stays
+         legible, because the shot fails if you can't see what is being withheld. */
+      .s3-redact-zone {
+        position: relative;
+        margin-top: 8px;
+        overflow: hidden;
+        border-radius: 5px;
+      }
+      .s3-redact {
+        position: absolute;
+        inset: 0;
+        background: var(--fg);
+        transform: scaleX(0);
+        transform-origin: left center;
+        will-change: transform;
+      }
+      /* The tag is a sibling, not a child of the wiping bar: text inside a
+         scaleX tween squashes horizontally as the bar sweeps. */
+      .s3-redact-tag {
+        position: absolute;
+        left: 14px;
+        top: 50%;
+        margin-top: -11px;
+        font-family: var(--font-mono);
+        font-size: 17px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--paper);
+        opacity: 0;
+        will-change: transform;
+      }
+      .s3-progress {
+        margin-top: 22px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--line);
+        overflow: hidden;
+      }
+      .s3-progress-fill {
+        height: 100%;
+        border-radius: 999px;
+        background: var(--fg-faint);
+        transform: scaleX(0);
+        transform-origin: left center;
+        will-change: transform;
+      }
+      .s3-verdict {
+        display: flex;
+        align-items: center;
+        gap: 26px;
+      }
+      .s3-check {
+        width: 58px;
+        height: 58px;
+        opacity: 0;
+        will-change: transform;
+      }
+      .s3-copy {
+        font-family: var(--font-display);
+        font-size: 40px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        line-height: 1.22;
+        max-width: 1280px;
+      }
+      .s3-tally {
+        display: flex;
+        gap: 34px;
+        font-family: var(--font-mono);
+        font-size: 19px;
+        color: var(--fg-muted);
+      }
+
+      /* ══ SCENE 4 ══════════════════════════════════════════════ */
+      /* 1040 + 120 + 520 = 1680. Sized explicitly rather than left to flex
+         shrinkage, and the side column is wide enough to keep the closing line
+         to two lines instead of orphaning "problem." on a third. */
+      .s4-list { width: 1040px; flex: none; }
+      .s4-item {
+        display: flex;
+        align-items: center;
+        gap: 26px;
+        height: 76px;
+        padding: 0 28px;
+        border-radius: 12px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        opacity: 0;
+        will-change: transform;
+      }
+      .s4-item + .s4-item { margin-top: 12px; }
+      .s4-idx {
+        font-family: var(--font-mono);
+        font-size: 17px;
+        color: var(--fg-faint);
+        width: 34px;
+        flex: none;
+      }
+      .s4-q {
+        font-family: var(--font-mono);
+        font-size: 24px;
+        color: var(--fg);
+        flex: 1;
+      }
+      .s4-tick {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--font-mono);
+        font-size: 17px;
+        letter-spacing: 0.08em;
+        color: var(--ok);
+        opacity: 0;
+        will-change: transform;
+      }
+      .s4-side { width: 520px; flex: none; }
+      .s4-meter {
+        height: 10px;
+        border-radius: 999px;
+        background: var(--sunk);
+        border: 1px solid var(--line);
+        overflow: hidden;
+      }
+      .s4-meter-fill {
+        height: 100%;
+        background: var(--accent);
+        transform: scaleX(0);
+        transform-origin: left center;
+        will-change: transform;
+      }
+
+      /* ══ SCENE 5 ══════════════════════════════════════════════ */
+      .s5 {
+        align-items: center;
+        text-align: center;
+      }
+      .s5-mark {
+        font-family: var(--font-display);
+        font-size: 168px;
+        font-weight: 600;
+        letter-spacing: -0.045em;
+        line-height: 1;
+        transform-origin: center center;
+        will-change: transform;
+        opacity: 0;
+      }
+      .s5-underline {
+        width: 470px;
+        height: 3px;
+        background: var(--accent);
+        border-radius: 999px;
+        transform: scaleX(0);
+        transform-origin: center center;
+        will-change: transform;
+      }
+      .s5-tag {
+        font-family: var(--font-display);
+        font-size: 52px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .s5-url {
+        display: inline-flex;
+        align-items: center;
+        height: 72px;
+        padding: 0 38px;
+        border-radius: 999px;
+        background: var(--accent-wash);
+        border: 1px solid var(--accent-line);
+        color: var(--accent);
+        font-family: var(--font-mono);
+        font-size: 25px;
+        letter-spacing: 0.02em;
+        transform-origin: center center;
+        will-change: transform;
+        opacity: 0;
+      }
+      .s5-note {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 22px;
+        color: var(--fg-muted);
+      }
+    </style>
+  </head>
+
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="19.5"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- ══════════ SCENE 1 — HOOK ══════════ -->
+      <div id="scene1" class="scene" data-layout-allow-overflow data-layout-allow-overlap>
+        <div class="frame">
+          <div class="s1-grid">
+            <div class="s1-left">
+              <p class="eyebrow" id="s1-eyebrow">Math practice</p>
+              <h1 class="display s1-h" style="margin-top: 30px">
+                <span class="wf" id="s1-h1">Anything can generate</span>
+                <span class="wf" id="s1-h2">a math problem.</span>
+              </h1>
+              <p class="s1-kicker wf" id="s1-kicker" style="margin-top: 44px">
+                Almost nothing checks it.
+              </p>
+            </div>
+
+            <div class="s1-right">
+              <div class="panel s1-card" id="s1-card">
+                <p class="panel-label">Generated · unchecked</p>
+                <div class="rule" style="margin: 22px 0 26px"></div>
+
+                <p class="math wf" id="s1-stmt" style="color: var(--fg-muted)">Solve for x</p>
+                <p
+                  class="math wf"
+                  id="s1-eq"
+                  style="margin-top: 14px; font-size: 38px; font-weight: 500"
+                >
+                  2x² − 5x − 3 = 0
+                </p>
+
+                <div class="rule" style="margin: 30px 0 26px"></div>
+
+                <p class="panel-label">Answer</p>
+                <div class="s1-answer-wrap" style="margin-top: 14px">
+                  <span class="math wf" id="s1-ans" style="font-size: 36px; font-weight: 500">
+                    x = 3,&nbsp; x = −2
+                  </span>
+                  <svg class="s1-strike" viewBox="0 0 316 14" aria-hidden="true">
+                    <path
+                      id="s1-strike-path"
+                      class="draw"
+                      pathLength="1"
+                      d="M 4 10 C 90 6, 200 8, 312 4"
+                      stroke="var(--bad)"
+                      stroke-width="4"
+                    />
+                  </svg>
+                </div>
+
+                <div style="margin-top: 30px">
+                  <span class="badge badge-bad" id="s1-badge">
+                    <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M 5 5 L 19 19 M 19 5 L 5 19"
+                        stroke="var(--bad)"
+                        stroke-width="3.4"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                    Incorrect
+                  </span>
+                </div>
+                <p
+                  class="mono wf"
+                  id="s1-why"
+                  style="margin-top: 18px; font-size: 20px; color: var(--fg-muted)"
+                >
+                  x = −2 gives 15, not 0.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ SCENE 2 — 01 CHOOSE ══════════ -->
+      <div id="scene2" class="scene" data-layout-allow-overflow data-layout-allow-overlap>
+        <div class="frame">
+          <div class="step-head">
+            <span class="step-num wf-i" id="s2-num">01</span>
+            <span class="step-name wf-i" id="s2-name">Choose</span>
+            <span class="step-rule" id="s2-rule"></span>
+          </div>
+
+          <div class="s2-grid" style="margin-top: 54px">
+            <div class="panel s2-builder" id="s2-builder">
+              <div class="s2-row">
+                <p class="s2-row-label">Topic</p>
+                <div class="s2-chips">
+                  <span class="chip" id="s2-c1">Quadratic Equations</span>
+                  <span class="chip">Polynomials</span>
+                  <span class="chip">Rational Functions</span>
+                </div>
+              </div>
+              <div class="s2-row">
+                <p class="s2-row-label">Difficulty</p>
+                <div class="s2-chips">
+                  <span class="chip">1</span>
+                  <span class="chip">2</span>
+                  <span class="chip">3</span>
+                  <span class="chip" id="s2-c2">4</span>
+                  <span class="chip">5</span>
+                  <span class="chip">Standard</span>
+                </div>
+              </div>
+              <div class="s2-row">
+                <p class="s2-row-label">Style</p>
+                <div class="s2-chips">
+                  <span class="chip">Drill</span>
+                  <span class="chip" id="s2-c3">Word problems</span>
+                  <span class="chip">Conceptual</span>
+                  <span class="chip">Proof</span>
+                </div>
+              </div>
+              <div class="s2-row">
+                <p class="s2-row-label">Format</p>
+                <div class="s2-chips">
+                  <span class="chip">Multiple choice</span>
+                  <span class="chip">Open answer</span>
+                  <span class="chip" id="s2-c4">Multi-part</span>
+                  <span class="chip">Graph</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel s2-spec" id="s2-spec">
+              <p class="panel-label">Your set</p>
+              <div class="rule" style="margin-top: 20px"></div>
+
+              <div class="s2-spec-row" id="s2-s1">
+                <span class="s2-spec-k">Topic</span>
+                <span class="s2-spec-v" id="s2-v1">—</span>
+              </div>
+              <div class="rule"></div>
+              <div class="s2-spec-row" id="s2-s2">
+                <span class="s2-spec-k">Difficulty</span>
+                <span class="s2-spec-v" id="s2-v2">—</span>
+              </div>
+              <div class="rule"></div>
+              <div class="s2-spec-row" id="s2-s3">
+                <span class="s2-spec-k">Style</span>
+                <span class="s2-spec-v" id="s2-v3">—</span>
+              </div>
+              <div class="rule"></div>
+              <div class="s2-spec-row" id="s2-s4">
+                <span class="s2-spec-k">Format</span>
+                <span class="s2-spec-v" id="s2-v4">—</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 48px">
+            <span class="btn-accent" id="s2-btn">
+              Generate 6 problems
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M 4 12 L 19 12 M 13 6 L 19 12 L 13 18"
+                  stroke="var(--accent-on)"
+                  stroke-width="2.4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  fill="none"
+                />
+              </svg>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ SCENE 3 — 02 VERIFY (climax) ══════════ -->
+      <div id="scene3" class="scene" data-layout-allow-overflow data-layout-allow-overlap>
+        <div class="frame">
+          <div class="step-head">
+            <span class="step-num wf-i" id="s3-num">02</span>
+            <span class="step-name wf-i" id="s3-name">Verify</span>
+            <span class="step-rule" id="s3-rule"></span>
+          </div>
+
+          <div class="s3-grid" style="margin-top: 46px">
+            <div class="panel s3-panel" id="s3-author">
+              <p class="panel-label">Author</p>
+              <p class="math" style="margin-top: 22px; font-size: 27px; color: var(--fg-muted)">
+                A ball is thrown; its height is
+              </p>
+              <p class="math" style="margin-top: 10px; font-size: 32px; font-weight: 500">
+                h(t) = −5t² + 20t + 1
+              </p>
+              <div class="s3-field">
+                <p class="panel-label" style="font-size: 13px">Answer key</p>
+                <p class="math" style="margin-top: 8px; font-size: 27px">t = 2 s, h = 21 m</p>
+              </div>
+              <div class="s3-progress" style="visibility: hidden"></div>
+            </div>
+
+            <div class="panel s3-panel" id="s3-solver">
+              <p class="panel-label">Independent solver</p>
+              <p class="math" style="margin-top: 22px; font-size: 27px; color: var(--fg-muted)">
+                A ball is thrown; its height is
+              </p>
+              <p class="math" style="margin-top: 10px; font-size: 32px; font-weight: 500">
+                h(t) = −5t² + 20t + 1
+              </p>
+              <div class="s3-field">
+                <p class="panel-label" style="font-size: 13px">Answer key</p>
+                <div class="s3-redact-zone">
+                  <!-- The key is legible right up to the wipe and then genuinely
+                       gone — it clears just as the bar arrives rather than living
+                       on underneath it, so nothing readable is ever merely
+                       covered up. Same read for the viewer, honest in the DOM. -->
+                  <p class="math" id="s3-key-text" style="font-size: 27px">
+                    t = 2 s, h = 21 m
+                  </p>
+                  <div class="s3-redact" id="s3-redact"></div>
+                  <span class="s3-redact-tag" id="s3-redact-tag">Withheld</span>
+                </div>
+              </div>
+              <div class="s3-progress">
+                <div class="s3-progress-fill" id="s3-prog"></div>
+              </div>
+              <!-- The bar never lifts: the solver does not get the key at the end
+                   either. Its own answer arrives underneath, on its own row. -->
+              <div class="s3-solved" id="s3-solved">
+                <p class="panel-label" style="font-size: 13px; color: var(--ok)">
+                  Solved independently
+                </p>
+                <p class="math" id="s3-solver-ans" style="margin-top: 8px; font-size: 27px">
+                  t = 2 s, h = 21 m
+                </p>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="s3-verdict" style="margin-top: 44px">
+            <svg class="s3-check" id="s3-check" viewBox="0 0 58 58" aria-hidden="true">
+              <circle
+                id="s3-ring"
+                class="draw"
+                pathLength="1"
+                cx="29"
+                cy="29"
+                r="26"
+                stroke="var(--ok)"
+                stroke-width="3"
+                style="transform-origin: 29px 29px; transform: rotate(-90deg)"
+              />
+              <path
+                id="s3-tick"
+                class="draw"
+                pathLength="1"
+                d="M 16 30 L 25 39 L 43 20"
+                stroke="var(--ok)"
+                stroke-width="4"
+              />
+            </svg>
+            <span class="badge badge-ok" id="s3-badge">Answers agree · verified</span>
+          </div>
+
+          <p class="s3-copy" style="margin-top: 34px">
+            <span class="wf" id="s3-copy1">Re-solved from scratch by a second model</span>
+            <span class="wf" id="s3-copy2">that never sees the answer key.</span>
+          </p>
+
+          <div class="s3-tally wf" id="s3-tally" style="margin-top: 30px">
+            <span>6 authored</span>
+            <span style="color: var(--ok)">6 verified</span>
+            <span>1 repaired</span>
+            <span style="color: var(--bad)">1 discarded</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ SCENE 4 — 03 PRACTICE ══════════ -->
+      <div id="scene4" class="scene" data-layout-allow-overflow data-layout-allow-overlap>
+        <div class="frame">
+          <div class="step-head">
+            <span class="step-num wf-i" id="s4-num">03</span>
+            <span class="step-name wf-i" id="s4-name">Practice</span>
+            <span class="step-rule" id="s4-rule"></span>
+          </div>
+
+          <div style="display: flex; gap: 120px; align-items: center; margin-top: 50px">
+            <div class="s4-list">
+              <div class="s4-item">
+                <span class="s4-idx">01</span>
+                <span class="s4-q">Factor 2x² − 5x − 3</span>
+                <span class="s4-tick">
+                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M 5 13 L 10 18 L 19 6"
+                      stroke="var(--ok)"
+                      stroke-width="3.2"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  CORRECT
+                </span>
+              </div>
+              <div class="s4-item">
+                <span class="s4-idx">02</span>
+                <span class="s4-q">Find the vertex of h(t) = −5t² + 20t + 1</span>
+                <span class="s4-tick">
+                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M 5 13 L 10 18 L 19 6"
+                      stroke="var(--ok)"
+                      stroke-width="3.2"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  CORRECT
+                </span>
+              </div>
+              <div class="s4-item">
+                <span class="s4-idx">03</span>
+                <span class="s4-q">Solve x² + 6x + 9 = 0</span>
+                <span class="s4-tick">
+                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M 5 13 L 10 18 L 19 6"
+                      stroke="var(--ok)"
+                      stroke-width="3.2"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  CORRECT
+                </span>
+              </div>
+              <div class="s4-item">
+                <span class="s4-idx">04</span>
+                <span class="s4-q">Discriminant of 3x² − 4x + 2</span>
+                <span class="s4-tick">
+                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M 5 13 L 10 18 L 19 6"
+                      stroke="var(--ok)"
+                      stroke-width="3.2"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  CORRECT
+                </span>
+              </div>
+              <div class="s4-item">
+                <span class="s4-idx">05</span>
+                <span class="s4-q">Sketch y = (x − 1)(x + 4)</span>
+                <span class="s4-tick">
+                  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M 5 13 L 10 18 L 19 6"
+                      stroke="var(--ok)"
+                      stroke-width="3.2"
+                      fill="none"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  CORRECT
+                </span>
+              </div>
+            </div>
+
+            <div class="s4-side">
+              <p class="panel-label wf" id="s4-sl">Set progress</p>
+              <div class="s4-meter wf" id="s4-meter-wrap" style="margin-top: 20px">
+                <div class="s4-meter-fill" id="s4-meter"></div>
+              </div>
+              <p
+                class="mono wf"
+                id="s4-count"
+                style="margin-top: 18px; font-size: 21px; color: var(--fg-muted)"
+              >
+                5 of 6 attempted
+              </p>
+              <p
+                class="wf"
+                id="s4-copy"
+                style="
+                  margin-top: 44px;
+                  font-family: var(--font-display);
+                  font-size: 34px;
+                  font-weight: 600;
+                  letter-spacing: -0.015em;
+                  line-height: 1.24;
+                "
+              >
+                Instant grading, and a worked solution for every problem.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ SCENE 5 — CTA ══════════ -->
+      <div id="scene5" class="scene" data-layout-allow-overflow data-layout-allow-overlap>
+        <div class="frame s5">
+          <p class="eyebrow" id="s5-eyebrow" style="text-align: center">Math practice</p>
+
+          <h2 class="s5-mark" id="s5-mark" style="margin-top: 26px">lemma</h2>
+          <div class="s5-underline" id="s5-underline" style="margin-top: 22px"></div>
+
+          <p class="s5-tag wf" id="s5-tag" style="margin-top: 40px">
+            Problem sets built to order.
+          </p>
+
+          <p class="s5-note wf" id="s5-note" style="margin-top: 26px">
+            <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M 12 3 L 20 6 V 12 C 20 16.5 16.5 19.8 12 21.5 C 7.5 19.8 4 16.5 4 12 V 6 Z"
+                stroke="var(--ok)"
+                stroke-width="1.9"
+                fill="none"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M 8.6 12 L 11 14.4 L 15.6 9.6"
+                stroke="var(--ok)"
+                stroke-width="2.1"
+                fill="none"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            Every problem independently verified · no account needed
+          </p>
+
+          <span class="s5-url" id="s5-url" style="margin-top: 46px">
+            learnwithlemma.vercel.app
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      /* ================================================================
+         CONSTANTS — authored to match the CSS above. Nothing is measured
+         from the DOM: in a multi-scene composition the later scenes are
+         not laid out at build time, so a getBoundingClientRect() here
+         would silently read zero.
+         ================================================================ */
+      var TOTAL = 19.5;
+      var F = 1 / 60;
+
+      var SEAM = {
+        s1s2: 4.0, // vertical push, 0.50s
+        s2s3: 8.2, // vertical push, 0.45s — punchier into the climax
+        s3s4: 13.4, // vertical push, 0.50s
+        s4s5: 16.4, // blur crossfade, 0.50s — the wind-down
+      };
+      // Both scenes centre their content, so mid-push there is a beat where each
+      // one's body has cleared the frame and you see bare paper. 0.42s keeps that
+      // beat short; longer and the page-turn reads as a gap rather than a turn.
+      var PUSH = 0.42;
+      var PUSH_FAST = 0.38;
+      var PUSH_EASE = "power3.inOut";
+
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+      window.__timelines["main"] = tl;
+
+      /* Waterfall arrival: opacity is BINARY at entry (a fade fights the
+         snap), the whip is a transform-only fromTo so it is correct under
+         a seek in either direction. */
+      function waterfall(sel, at, rise, dur) {
+        tl.set(sel, { opacity: 1 }, at);
+        tl.fromTo(
+          sel,
+          { y: rise },
+          { y: 0, duration: dur, ease: "power4.out" },
+          at
+        );
+        return at + dur;
+      }
+
+      /* Calm settle for panels and cards — power3.out, no overshoot.
+         back.out on a product surface reads as cartoon. */
+      function settle(sel, at, dur) {
+        tl.fromTo(
+          sel,
+          { opacity: 0, y: 26, scale: 0.97 },
+          { opacity: 1, y: 0, scale: 1, duration: dur || 0.5, ease: "power3.out" },
+          at
+        );
+      }
+
+      /* The 01 / 02 / 03 header is one beat: number, name, then the rule
+         sweeping out under them. */
+      function stepHead(numSel, nameSel, ruleSel, at) {
+        waterfall(numSel, at, 34, 0.14);
+        waterfall(nameSel, at + 0.06, 62, 0.18);
+        tl.fromTo(
+          ruleSel,
+          { scaleX: 0 },
+          { scaleX: 1, duration: 0.55, ease: "power3.out" },
+          at + 0.16
+        );
+      }
+
+      /* ================================================================
+         SCENE 1 — the hook. Anything can write the problem; the answer
+         is wrong, and nothing caught it.
+         ================================================================ */
+      {
+        waterfall("#s1-eyebrow", 0.12, 26, 0.13);
+
+        // Headline: anchor line travels furthest, second line overlaps in.
+        var t = waterfall("#s1-h1", 0.3, 80, 0.18);
+        waterfall("#s1-h2", t - 2 * F, 58, 0.16);
+
+        settle("#s1-card", 0.72, 0.55);
+
+        waterfall("#s1-stmt", 1.32, 30, 0.14);
+        waterfall("#s1-eq", 1.44, 38, 0.16);
+        waterfall("#s1-ans", 1.78, 34, 0.15);
+
+        // The strike is a pen stroke: pathLength=1 means dasharray/offset
+        // are already normalised in CSS, so no path measurement is needed.
+        tl.fromTo(
+          "#s1-strike-path",
+          { strokeDashoffset: 1 },
+          { strokeDashoffset: 0, duration: 0.3, ease: "power2.out" },
+          2.22
+        );
+
+        // Colour is never the only signal — the badge carries a mark and a word.
+        tl.fromTo(
+          "#s1-badge",
+          { opacity: 0, scale: 0.9 },
+          { opacity: 1, scale: 1, duration: 0.34, ease: "power3.out" },
+          2.46
+        );
+        waterfall("#s1-why", 2.68, 26, 0.14);
+
+        waterfall("#s1-kicker", 3.06, 54, 0.18);
+      }
+
+      /* ================================================================
+         SEAM 1 — vertical push. The page turns upward into step 01.
+         Outgoing and incoming move together at the same T; the motion IS
+         the handoff, so scene 1 is still fully composed when it starts.
+         ================================================================ */
+      tl.to("#scene1", { y: -1080, duration: PUSH, ease: PUSH_EASE }, SEAM.s1s2);
+      tl.fromTo(
+        "#scene2",
+        { y: 1080, opacity: 1 },
+        // opacity is restated in the destination: a cold render worker restores
+        // the authored `opacity: 0` before seeking, so a reveal that lives only
+        // in the from-vars encodes as an invisible scene.
+        { y: 0, opacity: 1, duration: PUSH, ease: PUSH_EASE },
+        SEAM.s1s2
+      );
+
+      /* ================================================================
+         SCENE 2 — 01 Choose. Four discrete edit beats: each chip lights
+         and its row of the spec panel answers in the SAME beat, so the
+         causality reads rather than two animations merely overlapping.
+         ================================================================ */
+      {
+        var S2 = 4.45;
+        stepHead("#s2-num", "#s2-name", "#s2-rule", S2);
+
+        settle("#s2-builder", S2 + 0.28, 0.5);
+        settle("#s2-spec", S2 + 0.4, 0.5);
+
+        // One state array carries BOTH sides of each couple, so the chip
+        // and its readout cannot desync under any seek.
+        var PICKS = [
+          { at: 5.5, chip: "#s2-c1", row: "#s2-s1", out: "#s2-v1", text: "Quadratic Equations" },
+          { at: 6.0, chip: "#s2-c2", row: "#s2-s2", out: "#s2-v2", text: "Level 4" },
+          { at: 6.5, chip: "#s2-c3", row: "#s2-s3", out: "#s2-v3", text: "Word problems" },
+          { at: 7.0, chip: "#s2-c4", row: "#s2-s4", out: "#s2-v4", text: "Multi-part" },
+        ];
+
+        PICKS.forEach(function (p) {
+          var label = "pick" + p.at;
+          tl.addLabel(label, p.at);
+
+          // Control side: the chip takes the accent and pulses once.
+          // The colour STEPS rather than tweens. Crossfading ink and ground at
+          // the same time passes through a muddy midpoint that measures ~3.9:1;
+          // stepping keeps every sampled frame at either 6.4:1 (dark on paper)
+          // or 9.6:1 (paper on oxblood), and the pulse carries the motion.
+          tl.set(p.chip, { backgroundColor: "#7a1f2b", color: "#fdf6f2" }, label);
+          tl.fromTo(
+            p.chip,
+            { scale: 1 },
+            { scale: 1.06, duration: 0.13, ease: "power2.out" },
+            label
+          );
+          tl.fromTo(
+            p.chip,
+            { scale: 1.06 },
+            { scale: 1, duration: 0.17, ease: "power2.inOut", immediateRender: false },
+            label + "+=0.13"
+          );
+
+          // Target side: same label, same beat — the spec answers.
+          tl.set(p.out, { textContent: p.text }, label);
+          tl.set(p.row, { opacity: 1 }, label);
+          tl.fromTo(
+            p.row,
+            { y: 14 },
+            { y: 0, duration: 0.26, ease: "power3.out" },
+            label
+          );
+        });
+
+        // The build button lands, then takes a press: linear compression,
+        // spring recovery. Two adjacent tweens on one property.
+        // The three scale tweens are strictly adjacent — the entrance lands at
+        // 7.64 before the press claims the property at 7.68, and the recovery
+        // finishes at 8.10, clear of the seam at 8.20.
+        tl.fromTo(
+          "#s2-btn",
+          { opacity: 0, y: 22, scale: 0.97 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.4, ease: "power3.out" },
+          7.24
+        );
+        tl.fromTo(
+          "#s2-btn",
+          { scale: 1 },
+          { scale: 0.94, duration: 0.1, ease: "none", immediateRender: false },
+          7.68
+        );
+        tl.fromTo(
+          "#s2-btn",
+          { scale: 0.94 },
+          { scale: 1, duration: 0.32, ease: "power3.out", immediateRender: false },
+          7.78
+        );
+      }
+
+      /* ================================================================
+         SEAM 2 — same push, tightened. Accenting the climax by tempo
+         rather than by swapping vocabulary keeps the piece coherent.
+         ================================================================ */
+      tl.to("#scene2", { y: -1080, duration: PUSH_FAST, ease: PUSH_EASE }, SEAM.s2s3);
+      tl.fromTo(
+        "#scene3",
+        { y: 1080, opacity: 1 },
+        { y: 0, opacity: 1, duration: PUSH_FAST, ease: PUSH_EASE },
+        SEAM.s2s3
+      );
+
+      /* ================================================================
+         SCENE 3 — 02 Verify. The climax, and the whole argument of the
+         product: the second solver is shown the problem with the answer
+         key physically redacted, and still lands on the same answer.
+         ================================================================ */
+      {
+        var S3 = 8.6;
+        stepHead("#s3-num", "#s3-name", "#s3-rule", S3);
+
+        settle("#s3-author", S3 + 0.26, 0.5);
+        settle("#s3-solver", S3 + 0.44, 0.5); // later, so cause precedes effect
+
+        // The redaction wipes across the key — the visual claim is literal. The
+        // tag fades in only once the bar has landed, so it never rides the wipe.
+        tl.fromTo(
+          "#s3-key-text",
+          { opacity: 1 },
+          { opacity: 0, duration: 0.12, ease: "power2.in" },
+          9.33
+        );
+        tl.fromTo(
+          "#s3-redact",
+          { scaleX: 0 },
+          { scaleX: 1, duration: 0.34, ease: "power3.inOut" },
+          9.45
+        );
+        tl.fromTo(
+          "#s3-redact-tag",
+          { opacity: 0 },
+          { opacity: 1, duration: 0.18, ease: "power2.out" },
+          9.74
+        );
+
+        // It solves, and lands its own answer — without ever being shown the key.
+        tl.fromTo(
+          "#s3-prog",
+          { scaleX: 0 },
+          { scaleX: 1, duration: 0.85, ease: "power2.inOut" },
+          9.96
+        );
+        tl.fromTo(
+          "#s3-solved",
+          { opacity: 0, y: 18 },
+          { opacity: 1, y: 0, duration: 0.38, ease: "power3.out" },
+          10.82
+        );
+
+        // Adjudication: the ring closes, then the tick lands inside it.
+        tl.fromTo(
+          "#s3-check",
+          { opacity: 0, scale: 0.86 },
+          { opacity: 1, scale: 1, duration: 0.3, ease: "power3.out" },
+          11.24
+        );
+        tl.fromTo(
+          "#s3-ring",
+          { strokeDashoffset: 1 },
+          { strokeDashoffset: 0, duration: 0.44, ease: "power2.out" },
+          11.28
+        );
+        tl.fromTo(
+          "#s3-tick",
+          { strokeDashoffset: 1 },
+          { strokeDashoffset: 0, duration: 0.28, ease: "power2.out" },
+          11.6
+        );
+        tl.fromTo(
+          "#s3-badge",
+          { opacity: 0, scale: 0.92 },
+          { opacity: 1, scale: 1, duration: 0.32, ease: "power3.out" },
+          11.7
+        );
+
+        var c = waterfall("#s3-copy1", 12.06, 64, 0.18);
+        waterfall("#s3-copy2", c - F, 52, 0.16);
+        waterfall("#s3-tally", 12.62, 30, 0.14);
+      }
+
+      /* ================================================================
+         SEAM 3 — push into step 03.
+         ================================================================ */
+      tl.to("#scene3", { y: -1080, duration: PUSH, ease: PUSH_EASE }, SEAM.s3s4);
+      tl.fromTo(
+        "#scene4",
+        { y: 1080, opacity: 1 },
+        { y: 0, opacity: 1, duration: PUSH, ease: PUSH_EASE },
+        SEAM.s3s4
+      );
+
+      /* ================================================================
+         SCENE 4 — 03 Practice. The set arrives as one cascade, then the
+         marks land as a second, faster one.
+         ================================================================ */
+      {
+        var S4 = 13.85;
+        stepHead("#s4-num", "#s4-name", "#s4-rule", S4);
+
+        // 5 items x 0.075s stagger = 0.375s — inside the one-beat cap.
+        var ITEM_STAGGER = 0.075;
+        gsap.utils.toArray("#scene4 .s4-item").forEach(function (el, i) {
+          tl.fromTo(
+            el,
+            { opacity: 0, y: 32 },
+            { opacity: 1, y: 0, duration: 0.42, ease: "power3.out" },
+            14.14 + i * ITEM_STAGGER
+          );
+        });
+
+        gsap.utils.toArray("#scene4 .s4-tick").forEach(function (el, i) {
+          tl.fromTo(
+            el,
+            { opacity: 0, scale: 0.86 },
+            { opacity: 1, scale: 1, duration: 0.26, ease: "power3.out" },
+            14.88 + i * 0.07
+          );
+        });
+
+        waterfall("#s4-sl", 14.6, 24, 0.13);
+        waterfall("#s4-meter-wrap", 14.72, 24, 0.13);
+        tl.fromTo(
+          "#s4-meter",
+          { scaleX: 0 },
+          { scaleX: 0.833, duration: 0.72, ease: "power2.out" },
+          14.9
+        );
+        waterfall("#s4-count", 15.24, 24, 0.13);
+        waterfall("#s4-copy", 15.44, 46, 0.18);
+      }
+
+      /* ================================================================
+         SEAM 4 — blur crossfade. The outro is the one place the piece
+         slows down; a fourth push would keep pressing when it should rest.
+         ================================================================ */
+      tl.to(
+        "#scene4",
+        { filter: "blur(10px)", scale: 1.03, opacity: 0, duration: 0.5, ease: "power2.inOut" },
+        SEAM.s4s5
+      );
+      tl.fromTo(
+        "#scene5",
+        { filter: "blur(10px)", scale: 0.97, opacity: 0 },
+        {
+          filter: "blur(0px)",
+          scale: 1,
+          opacity: 1,
+          duration: 0.5,
+          ease: "power2.inOut",
+        },
+        SEAM.s4s5 + 0.1
+      );
+
+      /* ================================================================
+         SCENE 5 — the sign-off. Calm settle on the wordmark; the accent
+         rule draws out from centre under it.
+         ================================================================ */
+      {
+        waterfall("#s5-eyebrow", 16.86, 24, 0.13);
+
+        tl.fromTo(
+          "#s5-mark",
+          { opacity: 0, y: 30, scale: 0.94 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.62, ease: "power3.out" },
+          16.96
+        );
+        tl.fromTo(
+          "#s5-underline",
+          { scaleX: 0 },
+          { scaleX: 1, duration: 0.6, ease: "power3.out" },
+          17.34
+        );
+
+        waterfall("#s5-tag", 17.5, 46, 0.18);
+        waterfall("#s5-note", 17.86, 28, 0.14);
+
+        tl.fromTo(
+          "#s5-url",
+          { opacity: 0, y: 22, scale: 0.96 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.44, ease: "power3.out" },
+          18.16
+        );
+      }
+
+      /* Pin the timeline to the declared data-duration so the last frame
+         holds on the CTA instead of ending on the final tween. */
+      tl.to({ _pad: 0 }, { _pad: 1, duration: 0.001, ease: "none" }, TOTAL - 0.001);
+    </script>
+  </body>
+</html>

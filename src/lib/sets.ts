@@ -14,10 +14,11 @@ import {
   type TaggedProblem,
 } from "@/lib/ai/schemas";
 import { generateProblems, repairProblem, type TopicInfo } from "@/lib/ai/generate";
-import { mapConcurrent, solveIndependently, solverAgrees, verifyProblem } from "@/lib/ai/verify";
-import { AI_CONCURRENCY } from "@/lib/ai/provider";
+import { solveIndependently, solverAgrees, verifyProblem } from "@/lib/ai/verify";
+import { AI_CONCURRENCY, createCallPool } from "@/lib/ai/provider";
+import { asyncQueue } from "@/lib/async-queue";
 import { instantiate, templatesFor } from "@/lib/templates";
-import { capFor, startOfToday } from "@/lib/limits";
+import { capFor, CAP_CHECK_FAILED, startOfToday } from "@/lib/limits";
 
 
 export type SetConfig = {
@@ -63,6 +64,68 @@ type NewProblemRow = {
 
 function hashOf(input: string): string {
   return createHash("sha256").update(input).digest("hex");
+}
+
+export type VerifiedProblem = { problem: TaggedProblem; verification: unknown };
+
+/**
+ * Verify one authored problem, with a single repair attempt when the solver
+ * disagreed. Returns null for anything that should be discarded.
+ *
+ * Up to three model calls, and it deliberately holds one pool slot for all of
+ * them: a repair is the tail of one verification, not a new piece of work
+ * entitled to its own share of the RPM budget.
+ *
+ * Never rejects, and that is the point. `callStructured` throws when a whole
+ * model chain is rate-limited, which on a free tier is an ordinary Tuesday —
+ * and an unhandled rejection here propagates out of `buildProblemSet` and fails
+ * the request, discarding the pool problems, the templates, and every problem
+ * that verified perfectly well alongside this one. A check that cannot reach a
+ * model discards its own problem, exactly like a check that failed.
+ */
+export async function verifyOrRepair(
+  p: TaggedProblem,
+  difficulty: number
+): Promise<VerifiedProblem | null> {
+  try {
+    return await runChecks(p, difficulty);
+  } catch {
+    return null;
+  }
+}
+
+async function runChecks(
+  p: TaggedProblem,
+  difficulty: number
+): Promise<VerifiedProblem | null> {
+  const outcome = await verifyProblem(p, difficulty);
+  if (outcome.ok) {
+    return {
+      problem: p,
+      verification: {
+        status: "verified",
+        method: "independent-solve",
+        solver_answer: outcome.solver?.final_answer_latex,
+        difficulty_estimate: outcome.solver?.difficulty_estimate,
+      },
+    };
+  }
+  // a repair needs a solver disagreement to adjudicate
+  if (!outcome.solver) return null;
+  const fixed = await repairProblem(p, outcome.solver);
+  if (!fixed) return null;
+  const recheck = await solveIndependently(fixed);
+  if (!recheck || !recheck.is_well_posed || !solverAgrees(fixed, recheck)) return null;
+  return {
+    // repair rewrites the problem but not what topic it belongs to
+    problem: { ...fixed, topic_index: p.topic_index },
+    verification: {
+      status: "repaired",
+      method: "independent-solve",
+      original_issue: outcome.reason,
+      solver_answer: recheck.final_answer_latex,
+    },
+  };
 }
 
 function rowFromGenerated(
@@ -112,13 +175,17 @@ export async function* buildProblemSet(
   // shared sets are assembled from problems that already exist, so counting
   // them would let a student spend their whole generation allowance on sets
   // that never used it. Both carry their own separate daily bound.
-  const { count: todayCount } = await db
+  const { count: todayCount, error: countErr } = await db
     .from("problem_sets")
     .select("id", { count: "exact", head: true })
     .eq("owner_id", userId)
     .is("config->>review", null)
     .is("config->>copiedFrom", null)
     .gte("created_at", startOfToday().toISOString());
+  if (countErr) {
+    yield { type: "error", message: CAP_CHECK_FAILED };
+    return;
+  }
   const cap = capFor("generatedSets", isAnonymous);
   if ((todayCount ?? 0) >= cap) {
     yield {
@@ -159,6 +226,21 @@ export async function* buildProblemSet(
   let done = 0;
   const tick = (): BuildEvent => ({ type: "progress", done, total: count });
 
+  /**
+   * Phase timing, the other half of the per-call trace in `callStructured`.
+   *
+   * One tells you which model calls were slow; this tells you whether a build
+   * was in model time at all, and which phase spent it. Answering "why did that
+   * take two minutes" needs both — the pool and template phases are supposed to
+   * be free, and the only way to notice they stopped being free is to time them.
+   */
+  let lastMark = Date.now();
+  const mark = (phase: string, extra = "") => {
+    const now = Date.now();
+    console.info(`[lemma:build] phase=${phase} ms=${now - lastMark}${extra && ` ${extra}`}`);
+    lastMark = now;
+  };
+
   // --- 1. pool reuse ---
   yield { type: "status", message: "Checking the problem pool..." };
   const { data: recent } = await db
@@ -198,6 +280,7 @@ export async function* buildProblemSet(
       yield tick();
     }
   }
+  mark("pool", `reused=${chosen.length}`);
 
   // A targeted set aims at the problems this student got wrong, which is exactly
   // where the author is most likely to land on something they have already seen.
@@ -252,11 +335,16 @@ export async function* buildProblemSet(
       yield tick();
     }
   }
+  mark("templates", `filled=${chosen.length}`);
 
   // --- 3. AI generation + verification ---
   // Stop starting new AI rounds once we're close to the route's maxDuration:
   // a short set that arrives beats a full one the platform kills mid-flight.
   const buildDeadline = requestStartedAt + BUILD_BUDGET_MS;
+  // One pool for the whole build. Authoring and verification overlap and both
+  // fan out, so a limit each would burst to the sum of the two — see
+  // `createCallPool`.
+  const pool = createCallPool(AI_CONCURRENCY);
   let aiNeeded = count - chosen.length;
   let regenAttempted = false;
   while (aiNeeded > 0 && Date.now() < buildDeadline) {
@@ -266,21 +354,75 @@ export async function* buildProblemSet(
         ? "Regenerating a few problems that failed checks..."
         : "Writing new problems with AI...",
     };
-    let generated: TaggedProblem[] = [];
-    try {
-      generated = await generateProblems({
-        topics: topicInfos,
-        count: aiNeeded,
-        difficulty: config.difficulty,
-        styles: config.styles,
-        formats: config.formats,
-        avoid: [...chosen.map((c) => c.statement), ...seenStatements].filter(Boolean),
-        focus: config.focus?.directives,
-      });
-    } catch (err) {
-      // Capacity failures are routine on a free tier. Anything already gathered
-      // from the pool and templates is still good practice — deliver it rather
-      // than throwing the whole set away.
+
+    const events = asyncQueue<BuildEvent>();
+    const verified: VerifiedProblem[] = [];
+    const wanted = aiNeeded;
+    let announced = false;
+
+    // Reports a generation failure as a value rather than rejecting, so the
+    // events already queued behind it still reach the student.
+    const round = (async (): Promise<unknown> => {
+      const checks: Promise<void>[] = [];
+      let failure: unknown;
+      try {
+        await generateProblems(
+          {
+            topics: topicInfos,
+            count: wanted,
+            difficulty: config.difficulty,
+            styles: config.styles,
+            formats: config.formats,
+            avoid: [...chosen.map((c) => c.statement), ...seenStatements].filter(Boolean),
+            focus: config.focus?.directives,
+          },
+          {
+            pool,
+            // Check each batch the moment it lands. The two phases used to be
+            // barriers, so the checker sat idle through the slowest kind's call
+            // and the writer sat idle through every solve.
+            onBatch: (batch) => {
+              if (!announced) {
+                announced = true;
+                events.push({
+                  type: "status",
+                  message: "Verifying every problem independently...",
+                });
+              }
+              for (const p of batch) {
+                checks.push(
+                  pool(() => verifyOrRepair(p, config.difficulty)).then((result) => {
+                    if (!result) return;
+                    verified.push(result);
+                    // Counts what has passed, not what is finally stored. The
+                    // meter's job is to show the build moving, and it otherwise
+                    // reads zero for the whole of the longest phase.
+                    events.push({
+                      type: "progress",
+                      done: Math.min(count, done + verified.length),
+                      total: count,
+                    });
+                  })
+                );
+              }
+            },
+          }
+        );
+      } catch (err) {
+        failure = err;
+      }
+      await Promise.all(checks);
+      return failure;
+    })().finally(() => events.close());
+
+    for await (const event of events.drain()) yield event;
+    const failure = await round;
+
+    // A capacity failure now only ends the build when it took everything with
+    // it; the calls that ran alongside the failed one may still have landed.
+    if (failure && verified.length === 0) {
+      // Anything already gathered from the pool and templates is still good
+      // practice — deliver it rather than throwing the whole set away.
       if (chosen.length > 0) {
         yield {
           type: "status",
@@ -292,47 +434,12 @@ export async function* buildProblemSet(
       }
       yield {
         type: "error",
-        message: `AI generation failed: ${err instanceof Error ? err.message : "unknown error"}`,
+        message: `AI generation failed: ${
+          failure instanceof Error ? failure.message : "unknown error"
+        }`,
       };
       return;
     }
-
-    yield { type: "status", message: "Verifying every problem independently..." };
-    const verified: { problem: TaggedProblem; verification: unknown }[] = [];
-    await mapConcurrent(generated, AI_CONCURRENCY, async (p) => {
-      const outcome = await verifyProblem(p, config.difficulty);
-      if (outcome.ok) {
-        verified.push({
-          problem: p,
-          verification: {
-            status: "verified",
-            method: "independent-solve",
-            solver_answer: outcome.solver?.final_answer_latex,
-            difficulty_estimate: outcome.solver?.difficulty_estimate,
-          },
-        });
-        return;
-      }
-      // one repair attempt when we have a solver disagreement to adjudicate
-      if (outcome.solver) {
-        const fixed = await repairProblem(p, outcome.solver);
-        if (fixed) {
-          const recheck = await solveIndependently(fixed);
-          if (recheck && recheck.is_well_posed && solverAgrees(fixed, recheck)) {
-            verified.push({
-              // repair rewrites the problem but not what topic it belongs to
-              problem: { ...fixed, topic_index: p.topic_index },
-              verification: {
-                status: "repaired",
-                method: "independent-solve",
-                original_issue: outcome.reason,
-                solver_answer: recheck.final_answer_latex,
-              },
-            });
-          }
-        }
-      }
-    });
 
     const rows = verified
       .slice(0, aiNeeded)
@@ -352,6 +459,7 @@ export async function* buildProblemSet(
       done++;
     }
     yield tick();
+    mark(regenAttempted ? "ai-regen" : "ai-round", `wanted=${wanted} kept=${verified.length}`);
 
     aiNeeded = count - chosen.length;
     if (aiNeeded > 0) {
@@ -397,6 +505,14 @@ export async function* buildProblemSet(
     yield { type: "error", message: "Failed to save the problem set items." };
     return;
   }
+
+  // Measured from the request, not from here: on a targeted build the coach
+  // read runs before this generator is first pulled, and it is charged to the
+  // same 300s invocation.
+  mark("save");
+  console.info(
+    `[lemma:build] done ms=${Date.now() - requestStartedAt} delivered=${chosen.length} asked=${count}`
+  );
 
   yield { type: "complete", setId: set.id };
 }

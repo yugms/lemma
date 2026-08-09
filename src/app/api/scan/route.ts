@@ -16,7 +16,7 @@ import {
   recordScanAttempts,
   type WorksheetGrading,
 } from "@/lib/worksheets";
-import { scanAllowance } from "@/lib/limits";
+import { ipAllowance, scanAllowance } from "@/lib/limits";
 import type { ProblemAnswerRecord, ProblemContentRecord } from "@/lib/ai/schemas";
 
 export const runtime = "nodejs";
@@ -110,6 +110,13 @@ export async function POST(request: NextRequest) {
   const allowance = await scanAllowance(user.id, user.is_anonymous ?? false);
   if (!allowance.ok) {
     return Response.json({ error: allowance.message }, { status: 429 });
+  }
+
+  // Same placement reasoning as the cap above, and the pair is the point: the
+  // per-user count is what a fresh account resets, this one it does not.
+  const networkAllowance = await ipAllowance("scans", request.headers);
+  if (!networkAllowance.ok) {
+    return Response.json({ error: networkAllowance.message }, { status: 429 });
   }
 
   const uploadId = await createUpload(user.id, body.setId, body.paths);

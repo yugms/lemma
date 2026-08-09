@@ -1,6 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { SCORED_MODES } from "@/lib/attempt-state";
-import { capFor, startOfToday } from "@/lib/limits";
+import { capFor, CAP_CHECK_FAILED, startOfToday } from "@/lib/limits";
 import { newShareCode } from "@/lib/share-code";
 import type { ProblemFormat } from "@/lib/ai/schemas";
 import type { SetConfig } from "@/lib/sets";
@@ -288,12 +288,18 @@ export async function createReviewSet(
 
   const db = createServiceClient();
 
-  const { count: todayCount } = await db
+  const { count: todayCount, error: countErr } = await db
     .from("problem_sets")
     .select("id", { count: "exact", head: true })
     .eq("owner_id", userId)
     .not("config->>review", "is", null)
     .gte("created_at", startOfToday().toISOString());
+  if (countErr) return { error: CAP_CHECK_FAILED };
+  // Not `isAnonymous`, because a guest cannot get here: `buildReviewSet` turns
+  // them away before this runs, since review needs a practice history that only
+  // survives sign-in. The two caps are equal anyway — this stays hardcoded so
+  // that a future split of the guest and member numbers does not read as a
+  // decision that was made here.
   const reviewCap = capFor("reviewSets", false);
   if ((todayCount ?? 0) >= reviewCap) {
     return { error: `That's ${reviewCap} review sets today — practise one of them first.` };

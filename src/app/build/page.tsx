@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Build a set",
   description:
-    "Pick a course, up to six topics, a difficulty and a style. Every problem is independently verified before it reaches you.",
+    "Pick up to six topics — from one course or across several — plus a difficulty and a style. Every problem is independently verified before it reaches you.",
 };
 
 export default async function BuildPage() {

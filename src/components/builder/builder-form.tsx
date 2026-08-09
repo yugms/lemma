@@ -3,7 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
-import { ChevronDown, Loader2, Minus, Plus, Sparkles, Zap } from "lucide-react";
+import { ChevronDown, Loader2, Minus, Plus, Sparkles, X, Zap } from "lucide-react";
 import type { CatalogCourse } from "@/lib/catalog";
 import { streamBuild } from "@/lib/build-stream";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
@@ -69,6 +69,9 @@ function Row({
 
 export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
   const router = useRouter();
+  /* Which course is being browsed — not a property of the set. A set is just a
+     list of topic ids, and the pipeline labels each one with its own course
+     when it prompts the author, so a set may span as many as it likes. */
   const [courseId, setCourseId] = useState(catalog[0]?.id ?? "");
   const [unitId, setUnitId] = useState<string>("all");
   const [topicIds, setTopicIds] = useState<string[]>([]);
@@ -84,6 +87,41 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
     () => (course ? (unitId === "all" ? course.units : course.units.filter((u) => u.id === unitId)) : []),
     [course, unitId]
   );
+
+  /** Flat topic id -> where it lives, so a selection can be named from anywhere
+      in the catalog rather than only from the part currently on screen. */
+  const topicIndex = useMemo(() => {
+    const map = new Map<string, { title: string; courseId: string; courseTitle: string }>();
+    for (const c of catalog)
+      for (const u of c.units)
+        for (const t of u.topics) map.set(t.id, { title: t.title, courseId: c.id, courseTitle: c.title });
+    return map;
+  }, [catalog]);
+
+  const selected = useMemo(
+    () =>
+      topicIds.flatMap((id) => {
+        const t = topicIndex.get(id);
+        return t ? [{ id, ...t }] : [];
+      }),
+    [topicIds, topicIndex]
+  );
+
+  /** Per course, for the chip counters — the only cue that a course you are not
+      looking at still has topics in the set. */
+  const countByCourse = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of selected) counts.set(t.courseId, (counts.get(t.courseId) ?? 0) + 1);
+    return counts;
+  }, [selected]);
+
+  /* Selected topics the current course/unit view doesn't render. Without them
+     the selection would be invisible and unremovable the moment you switch
+     course, which is exactly what a cross-course set asks you to do. */
+  const offscreen = useMemo(() => {
+    const shown = new Set(visibleUnits.flatMap((u) => u.topics.map((t) => t.id)));
+    return selected.filter((t) => !shown.has(t.id));
+  }, [selected, visibleUnits]);
 
   const toggle = <T,>(list: T[], v: T, set: (next: T[]) => void, min = 0) => {
     if (list.includes(v)) {
@@ -134,33 +172,40 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
     }
   }
 
-  const selectedTopicTitles = useMemo(() => {
-    const all = catalog.flatMap((c) => c.units.flatMap((u) => u.topics));
-    return topicIds
-      .map((id) => all.find((t) => t.id === id)?.title)
-      .filter((t): t is string => Boolean(t));
-  }, [catalog, topicIds]);
 
   return (
     <div className="border-t border-line">
       <Row label="Course">
         <div className="flex flex-wrap gap-2">
-          {catalog.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              aria-pressed={c.id === courseId}
-              disabled={busy}
-              onClick={() => {
-                setCourseId(c.id);
-                setUnitId("all");
-                setTopicIds([]);
-              }}
-              className="chip"
-            >
-              {c.title}
-            </button>
-          ))}
+          {catalog.map((c) => {
+            const picked = countByCourse.get(c.id) ?? 0;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                aria-pressed={c.id === courseId}
+                disabled={busy}
+                onClick={() => {
+                  // Topics are deliberately kept: switching course adds to the
+                  // set rather than starting it over. Only the unit filter is
+                  // reset, since it names a unit of the course being left.
+                  setCourseId(c.id);
+                  setUnitId("all");
+                }}
+                className="chip"
+              >
+                {c.title}
+                {picked > 0 && (
+                  <>
+                    <span aria-hidden className="font-mono text-[11px] tabular-nums opacity-65">
+                      {picked}
+                    </span>
+                    <span className="sr-only">({picked} selected)</span>
+                  </>
+                )}
+              </button>
+            );
+          })}
         </div>
         {course && course.units.length > 1 && (
           <div className="relative mt-4 inline-block">
@@ -184,6 +229,10 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
             />
           </div>
         )}
+        <p className="mt-3 text-[13px] leading-relaxed text-faint">
+          Topics stay selected when you switch course, so one set can draw on
+          several.
+        </p>
       </Row>
 
       <Row label="Topics" aside={`${topicIds.length} / ${MAX_TOPICS}`}>
@@ -218,6 +267,30 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
               </div>
             </div>
           ))}
+
+          {offscreen.length > 0 && (
+            <div className="border-t border-line pt-5">
+              <p className="mb-2.5 text-xs text-faint">Also in this set</p>
+              <div className="flex flex-wrap gap-2">
+                {offscreen.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    aria-pressed
+                    disabled={busy}
+                    onClick={() => toggleTopic(t.id)}
+                    className="chip"
+                  >
+                    {/* The course is part of the name, not decoration: out of its
+                        own list a topic title alone doesn't say where it came from. */}
+                    {t.courseId !== courseId && <span className="opacity-65">{t.courseTitle} /</span>}
+                    {t.title}
+                    <X aria-hidden className="h-3 w-3" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </Row>
 
@@ -335,8 +408,12 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
           <p className="text-sm leading-relaxed text-muted">
             <span className="text-fg">{count} problems</span> ·{" "}
             {DIFFICULTY_LABELS[difficulty]} ·{" "}
-            {selectedTopicTitles.slice(0, 3).join(", ")}
-            {selectedTopicTitles.length > 3 && ` +${selectedTopicTitles.length - 3} more`}
+            {selected
+              .slice(0, 3)
+              .map((t) => t.title)
+              .join(", ")}
+            {selected.length > 3 && ` +${selected.length - 3} more`}
+            {countByCourse.size > 1 && ` · across ${countByCourse.size} courses`}
           </p>
         )}
 

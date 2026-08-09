@@ -57,6 +57,16 @@ export default function PrivacyPage() {
               detail:
                 "The hosting provider records requests, including IP addresses, as part of running the service. These are not linked to your practice record and are not used to build any profile of you.",
             },
+            {
+              term: "Abuse counters",
+              detail:
+                "When you generate a set or scan a worksheet, a scrambled one-way fingerprint of your network address is recorded with a timestamp, so that no single network can exhaust the shared model quota for everyone else. The address itself is never written down and the fingerprint cannot be turned back into one. These rows are not linked to your account and carry nothing about what you were working on. They are kept for a day and then deleted.",
+            },
+            {
+              term: "That you confirmed your age",
+              detail:
+                "The date you confirmed you meet the minimum age, described in its own section below. No date of birth is asked for or stored.",
+            },
           ]}
         />
       </Section>
@@ -147,8 +157,10 @@ export default function PrivacyPage() {
           there is nothing optional to consent to.
         </p>
         <p>
-          Your light or dark theme preference is kept in your browser&apos;s local
-          storage rather than a cookie, and is never sent to the server.
+          Two other things are kept in your browser&apos;s local storage rather than in a
+          cookie, and neither is sent to the server: your light or dark theme preference,
+          and a note that you have already confirmed your age, which is what stops that
+          question being asked again every visit.
         </p>
         <p>
           The one exception is Cloudflare&apos;s anti-abuse check described above, which
@@ -221,9 +233,18 @@ export default function PrivacyPage() {
           consenting to this kind of processing on your own.
         </p>
         <p>
-          It is not directed at children under those ages and does not knowingly collect
-          anything from them. If you are a parent or guardian and believe a child has
-          used lemma, email{" "}
+          You are asked to confirm this once, before an account is created, whether you
+          continue as a guest or sign in with Google. Declining creates nothing. What is
+          kept is the fact that you confirmed and when — not a date of birth, which is
+          not asked for and not stored. This is a declaration rather than a verification:
+          checking it properly would mean collecting documents or a parent&apos;s contact
+          details from every student, which is far more information about children than
+          the rule is trying to protect.
+        </p>
+        <p>
+          lemma is not directed at children under those ages and does not knowingly
+          collect anything from them. If you are a parent or guardian and believe a child
+          has used lemma, email{" "}
           <a href={`mailto:${LEGAL_CONTACT}`} className="link">
             {LEGAL_CONTACT}
           </a>{" "}

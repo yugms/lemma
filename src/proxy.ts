@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabasePublishableKey, supabaseUrl } from "@/lib/env";
 import { contentSecurityPolicy, newNonce } from "@/lib/csp";
+import { authCookieOptions } from "@/lib/supabase/cookie-options";
 
 export async function proxy(request: NextRequest) {
   const nonce = newNonce();
@@ -28,16 +29,25 @@ export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: forwardedHeaders() } });
 
   const supabase = createServerClient(supabaseUrl(), supabasePublishableKey(), {
+    cookieOptions: authCookieOptions(),
     cookies: {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet, headers) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request: { headers: forwardedHeaders() } });
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options)
         );
+        /**
+         * `headers` is the library's own no-store set, and it only arrives on
+         * responses that carry a refreshed session. Forwarding it is what stops
+         * a CDN or reverse proxy caching a page along with its `Set-Cookie` and
+         * handing one student's session to the next visitor. It was being
+         * dropped, which is the one way the token really could have leaked.
+         */
+        Object.entries(headers).forEach(([key, value]) => response.headers.set(key, value));
       },
     },
   });

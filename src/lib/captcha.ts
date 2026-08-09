@@ -11,6 +11,15 @@ import { turnstileSiteKey } from "@/lib/env";
  * limit slows that down; a CAPTCHA is what actually stops it, and their docs
  * recommend one specifically because anonymous users are rows in your database.
  *
+ * **Do not mistake this for the boundary.** Everything below runs in the
+ * browser, and the token is verified by Supabase, not by this app — so it only
+ * binds callers who come through this code. A script calling
+ * `signInAnonymously` against the public key never loads any of it, and the one
+ * thing that stops *that* is Turnstile being switched on in the Supabase
+ * dashboard, which is not in this repo and cannot be asserted from here. What
+ * bounds the damage either way is `IP_LIMITS` in `limits.ts`, which sits on the
+ * routes that actually spend money and does not care how the caller signed in.
+ *
  * Three properties this is built around:
  *
  * 1. **Off unless configured.** With no site key nothing is loaded, nothing is
@@ -37,13 +46,31 @@ type TurnstileOptions = {
   sitekey: string;
   action: string;
   callback: (token: string) => void;
-  "error-callback": () => void;
+  "error-callback": (code?: string) => void;
   "timeout-callback": () => void;
   "before-interactive-callback": () => void;
   "after-interactive-callback": () => void;
   appearance: "always" | "execute" | "interaction-only";
   theme: "auto" | "light" | "dark";
+  retry: "auto" | "never";
 };
+
+/**
+ * Errors no amount of retrying will fix — a wrong sitekey, a domain not on the
+ * widget's allowlist, a device clock too far out. Everything else Cloudflare
+ * reports, including the `110600`/`110620` timeouts that share a prefix with
+ * these, is transient and worth another attempt.
+ *
+ * https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
+ */
+const UNRECOVERABLE_ERROR_CODES = new Set([
+  "110100", // invalid sitekey
+  "110110", // unknown sitekey
+  "110200", // domain not allowed
+  "200100", // clock or cache mismatch
+  "400020", // sitekey problem
+  "400070", // sitekey problem
+]);
 
 declare global {
   interface Window {
@@ -151,8 +178,32 @@ export async function solveCaptcha(): Promise<string | null> {
         action: "turnstile-spin-v2",
         appearance: "interaction-only",
         theme: "auto",
+        // Cloudflare's default, restated because it is load-bearing here and
+        // silently reversible: the widget re-attempts every 8s on its own, and
+        // the error handling below is written around that rather than against
+        // it. Setting this to "never" would make a single blip fatal again.
+        retry: "auto",
         callback: succeed,
-        "error-callback": () => fail("The anti-abuse check didn't pass."),
+        /**
+         * Transient errors deliberately do *not* fail here.
+         *
+         * This used to reject on the first error, which tore the widget down —
+         * and since teardown removes the widget, it also cancelled the retry
+         * Cloudflare was about to make. One dropped packet on a phone was
+         * enough to kill the student's whole action, which is the "fails
+         * occasionally" this check was reported for. Leaving the widget alive
+         * lets it retry roughly five times inside the timeout below, which is
+         * the real backstop.
+         */
+        "error-callback": (code) => {
+          if (code && UNRECOVERABLE_ERROR_CODES.has(code)) {
+            fail(
+              `The anti-abuse check isn't set up correctly for this site, so a guest session couldn't be started. (If you run this project: error ${code} means NEXT_PUBLIC_TURNSTILE_SITE_KEY is wrong, or this domain is not on the widget's allowlist in Cloudflare.)`
+            );
+            return;
+          }
+          console.warn(`[lemma] Turnstile error ${code ?? "(no code)"}; letting the widget retry.`);
+        },
         "timeout-callback": () => fail("The anti-abuse check timed out."),
         // Only dim the page once there is actually something to interact with.
         "before-interactive-callback": () => host.setAttribute("data-interactive", "true"),

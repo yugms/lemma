@@ -50,6 +50,18 @@ export function geminiApiKey(): string {
 }
 
 /**
+ * Whether this build is the deployed one.
+ *
+ * Read through here rather than at each use site so the security properties
+ * that hang off it — the `Secure` flag on session cookies, above all — are
+ * decided in one place. Next inlines `NODE_ENV` for client bundles too, so this
+ * answers the same in the browser as on the server.
+ */
+export function isProduction(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+/**
  * Cloudflare Turnstile's public site key, or `null` when not configured.
  *
  * Optional by design, and that is the whole safety property: unset means no

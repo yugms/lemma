@@ -29,13 +29,28 @@ const SECURITY_HEADERS = [
     key: "Permissions-Policy",
     value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
   },
+  // Severs the window reference a cross-origin opener would otherwise keep.
+  // Safe here only because Google sign-in is a full-page redirect — adding
+  // `skipBrowserRedirect` to signInWithOAuth would turn it into a popup and
+  // this would break the callback.
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
 ];
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
 
   async headers() {
-    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+    return [
+      { source: "/:path*", headers: SECURITY_HEADERS },
+      /**
+       * Every API response here is per-user — a grade, a set, a scan result —
+       * and none of them set `Cache-Control` themselves, so they inherited
+       * whatever a CDN chose to assume. Declared once at the route prefix
+       * rather than on ~25 `Response.json` calls, which also covers routes
+       * added later. The SSE route restates it on its own response.
+       */
+      { source: "/api/:path*", headers: [{ key: "Cache-Control", value: "no-store" }] },
+    ];
   },
 
   experimental: {
