@@ -256,6 +256,81 @@ function curvePath(c: PlotCurve, w: PlotWindow, g: ReturnType<typeof plotGeometr
   return segments.join(" ");
 }
 
+/** A coordinate pair as a reader would say it. */
+const point = (x: number, y: number) => `(${fmt(x)}, ${fmt(y)})`;
+
+/** One curve, described rather than drawn. */
+function describeCurve(c: PlotCurve): string {
+  switch (c.kind) {
+    case "linear": {
+      const through =
+        c.b === 0 ? "through the origin" : `crossing the y-axis at ${point(0, c.b)}`;
+      if (c.m === 0) return `a horizontal line at y = ${fmt(c.b)}`;
+      return `a straight line with slope ${fmt(c.m)} ${through}`;
+    }
+    case "quadratic": {
+      // Vertex from the coefficients, so the description names the feature a
+      // question is most likely to be about rather than restating the formula.
+      const h = -c.b / (2 * c.a);
+      const k = c.c - (c.b * c.b) / (4 * c.a);
+      return `a parabola opening ${c.a > 0 ? "upward" : "downward"} with its vertex at ${point(h, k)}`;
+    }
+    case "abs":
+      return `a V-shaped graph opening ${c.a > 0 ? "upward" : "downward"} with its corner at ${point(c.h, c.k)}`;
+    case "exp":
+      return `an ${c.base > 1 ? "increasing" : "decreasing"} exponential curve passing through ${point(0, c.a)}`;
+    default:
+      return assertNeverCurve(c);
+  }
+}
+
+/** Same guard rail as `assertNeverFormat`: a new curve family is a compile error. */
+function assertNeverCurve(x: never): never {
+  throw new Error(`Unhandled plot curve: ${JSON.stringify(x)}`);
+}
+
+/**
+ * What the plot shows, in words.
+ *
+ * The accessible name used to be the constant "Coordinate plot" for every graph
+ * in the app, which is worse than it sounds: on a `graph_value` problem the plot
+ * *is* the question — the curve, the intercepts and the marked points are the
+ * whole stimulus — so a screen-reader user was told a picture existed and
+ * nothing about what was in it.
+ *
+ * Derived rather than authored, because the spec is already validated and
+ * complete. Asking the model for alt text would add a field that can be wrong,
+ * absent, or disagree with the drawing; arithmetic on the same numbers the
+ * renderer uses cannot.
+ */
+export function describePlot(spec: PlotSpec): string {
+  const w = spec.window;
+  const parts = [
+    `Coordinate plot. x from ${fmt(w.xMin)} to ${fmt(w.xMax)}, y from ${fmt(w.yMin)} to ${fmt(w.yMax)}.`,
+  ];
+
+  if (spec.curves.length === 1) {
+    parts.push(`Shows ${describeCurve(spec.curves[0]!)}.`);
+  } else if (spec.curves.length > 1) {
+    parts.push(
+      `Shows ${spec.curves.length} curves: ${spec.curves.map(describeCurve).join("; ")}.`
+    );
+  }
+
+  if (spec.marks.length > 0) {
+    // A label is the author naming the point ("vertex"), which is worth more
+    // than its coordinates alone — but never instead of them.
+    const marks = spec.marks.map((m) =>
+      m.label ? `${m.label} at ${point(m.x, m.y)}` : point(m.x, m.y)
+    );
+    parts.push(
+      `${spec.marks.length === 1 ? "Marked point" : "Marked points"}: ${marks.join(", ")}.`
+    );
+  }
+
+  return parts.join(" ");
+}
+
 /**
  * Render a plot to a standalone SVG string.
  *
@@ -339,7 +414,7 @@ export function renderPlot(spec: PlotSpec, opts?: { title?: string }): string {
     }
   }
 
-  const title = opts?.title ?? "Coordinate plot";
+  const title = opts?.title ?? describePlot(spec);
   return (
     `<svg viewBox="0 0 ${PLOT_W} ${PLOT_H}" role="img" aria-label="${escapeXml(title)}" ` +
     `preserveAspectRatio="xMidYMid meet" class="w-full h-auto">` +

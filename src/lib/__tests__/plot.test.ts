@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  describePlot,
   evalCurve,
   niceStep,
   plotGeometry,
@@ -131,5 +132,76 @@ describe("renderPlot", () => {
 
   it("carries an accessible name", () => {
     expect(renderPlot(spec(), { title: "y equals x" })).toContain('aria-label="y equals x"');
+  });
+
+  it("describes itself when no title is given", () => {
+    // The default used to be the constant "Coordinate plot", which told a
+    // screen-reader user a picture existed and nothing about what was in it —
+    // on a read-a-value question the plot *is* the question.
+    const label = renderPlot(spec());
+    expect(label).not.toContain('aria-label="Coordinate plot"');
+    expect(label).toContain("slope 1");
+  });
+});
+
+describe("describePlot", () => {
+  it("states the window", () => {
+    expect(describePlot(spec())).toContain("x from -5 to 5, y from -5 to 5");
+  });
+
+  it("describes each curve family by its salient feature", () => {
+    expect(describePlot(spec({ curves: [{ kind: "linear", m: 1.5, b: 0 }] }))).toContain(
+      "straight line with slope 1.5 through the origin"
+    );
+    expect(describePlot(spec({ curves: [{ kind: "linear", m: 0, b: 3 }] }))).toContain(
+      "horizontal line at y = 3"
+    );
+    // Vertex, not coefficients: it is what a question about a parabola asks for.
+    expect(describePlot(spec({ curves: [{ kind: "quadratic", a: 1, b: -4, c: 3 }] }))).toContain(
+      "parabola opening upward with its vertex at (2, -1)"
+    );
+    expect(describePlot(spec({ curves: [{ kind: "abs", a: -1, h: 2, k: 1 }] }))).toContain(
+      "V-shaped graph opening downward with its corner at (2, 1)"
+    );
+    expect(describePlot(spec({ curves: [{ kind: "exp", a: 2, base: 3 }] }))).toContain(
+      "increasing exponential curve passing through (0, 2)"
+    );
+    expect(describePlot(spec({ curves: [{ kind: "exp", a: 1, base: 0.5 }] }))).toContain(
+      "decreasing exponential"
+    );
+  });
+
+  it("counts multiple curves", () => {
+    const two = describePlot(
+      spec({
+        curves: [
+          { kind: "linear", m: 1, b: 0 },
+          { kind: "linear", m: -1, b: 2 },
+        ],
+      })
+    );
+    expect(two).toContain("Shows 2 curves");
+  });
+
+  it("names marked points, keeping the author's label and the coordinates", () => {
+    const described = describePlot(
+      spec({
+        marks: [
+          { x: 2, y: 3, label: "vertex" },
+          { x: -2, y: -3 },
+        ],
+      })
+    );
+    expect(described).toContain("Marked points: vertex at (2, 3), (-2, -3)");
+  });
+
+  it("says nothing about curves or marks when there are none", () => {
+    const bare = describePlot(spec({ curves: [], marks: [] }));
+    expect(bare).not.toContain("Shows");
+    expect(bare).not.toContain("Marked");
+  });
+
+  it("survives the tick formatter's negative zero", () => {
+    expect(describePlot(spec({ curves: [{ kind: "linear", m: -0, b: -0 }] }))).not.toContain("-0");
   });
 });
