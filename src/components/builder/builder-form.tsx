@@ -7,7 +7,9 @@ import { ChevronDown, Loader2, Minus, Plus, Sparkles, X, Zap } from "lucide-reac
 import type { CatalogCourse } from "@/lib/catalog";
 import { streamBuild } from "@/lib/build-stream";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
-import { PROBLEM_FORMATS, type ProblemFormat, type ProblemStyle } from "@/lib/ai/schemas";
+// From `kinds` rather than `schemas`: the vocabulary is the same, but importing
+// a value from `schemas` puts the whole zod runtime in this route's bundle.
+import { PROBLEM_FORMATS, type ProblemFormat, type ProblemStyle } from "@/lib/ai/kinds";
 
 /* Labels come from `format.ts` so the builder's controls and the stats
    breakdowns always name the same thing the same way. */

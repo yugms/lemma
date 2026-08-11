@@ -16,7 +16,8 @@ import {
   type Handle,
   type SketchKind,
 } from "@/components/problem-inputs/graph-sketch";
-import { assertNeverFormat, type CheckResponse, type PreparedProblem } from "@/lib/ai/schemas";
+import { assertNeverFormat } from "@/lib/ai/kinds";
+import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
 import { STYLE_LABELS } from "@/lib/format";
 
 export type { CheckResponse };

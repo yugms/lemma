@@ -48,19 +48,11 @@ export type ScanMark = z.infer<typeof ScanMarkSchema>;
 export type ScanResult = z.infer<typeof ScanResultSchema>;
 
 /**
- * Did the student actually answer this one?
- *
- * A blank is "not attempted", which is not the same as "wrong", and the
- * difference is permanent: an unattempted problem recorded as a miss follows
- * the student through Stats, Review and the coach forever. Observed in
- * practice — a page numbered "6)" with nothing after it came back `found: true,
- * read_answer: "", correct: false, confidence: 1`, so the confidence gate let
- * it straight through. Confidence guards *misreading*; this is a different
- * failure, and it has to be decided here rather than trusted from the model.
+ * Re-exported so this stays the module to reach for when working on scanning.
+ * It is *defined* in a zod-free file because the results view needs it in the
+ * browser — see the note there.
  */
-export function wasAttempted(m: ScanMark): boolean {
-  return m.found && m.read_answer.trim().length > 0;
-}
+export { wasAttempted } from "@/lib/scan-marks";
 
 export type ScanProblem = {
   id: string;

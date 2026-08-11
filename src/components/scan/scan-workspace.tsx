@@ -3,7 +3,8 @@
 import { useState } from "react";
 import clsx from "clsx";
 import { Check, HelpCircle, Loader2, Minus, Upload, X } from "lucide-react";
-import { wasAttempted, type ScanMark } from "@/lib/ai/grade-scan";
+import { wasAttempted } from "@/lib/scan-marks";
+import type { ScanMark } from "@/lib/ai/grade-scan";
 import type { WorksheetGrading } from "@/lib/worksheets";
 
 /** Kept in step with the storage policy's `${userId}/...` prefix. */
