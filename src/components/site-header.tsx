@@ -6,15 +6,10 @@ import { AuthButton } from "@/components/auth-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Wordmark } from "@/components/brand";
 import { SessionChip } from "@/components/stats/session-chip";
+// Shared with the phone tab bar, which has to gate on account exactly the way
+// this does. Two copies of the list would drift silently, and only on a phone.
+import { NAV } from "@/lib/nav";
 import type { HeaderUser } from "@/lib/auth-server";
-
-const NAV = [
-  { href: "/build", label: "Build" },
-  { href: "/sets", label: "Sets" },
-  // Both are derived from an account's history, so a guest has nothing to see.
-  { href: "/review", label: "Review", requiresAccount: true },
-  { href: "/stats", label: "Stats", requiresAccount: true },
-];
 
 export function SiteHeader({
   user,
@@ -44,7 +39,12 @@ export function SiteHeader({
           >
             <Wordmark />
           </Link>
-          <nav aria-label="Main" className="flex items-center gap-1">
+          {/* Gone below `md`, where MobileTabBar carries it instead. The
+              breakpoint is 768 rather than this repo's habitual 640: the row
+              needs ~520px of min-content, and at 640 the ~80px of slack left
+              over is eaten by the widest signed-in state — a display name
+              beside the sign-out control. */}
+          <nav aria-label="Main" className="hidden items-center gap-1 md:flex">
             {nav.map((item) => {
               const active =
                 pathname === item.href || pathname.startsWith(`${item.href}/`);

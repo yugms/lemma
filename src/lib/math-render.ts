@@ -103,7 +103,11 @@ export function renderProse(raw: string): string {
     if (m[1] !== undefined) {
       out += renderMath(m[1]);
     } else if (m[2] !== undefined) {
-      out += `<span class="my-3 block text-center">${renderMath(m[2], true)}</span>`;
+      // `overflow-x-auto` here as well as on `.katex-display` in globals.css:
+      // KaTeX only emits `katex-display` when it renders in display mode, and
+      // this wrapper is what a `\[...\]` becomes even when the inner render
+      // falls back. A wide equation that escapes both scrolls the document.
+      out += `<span class="my-3 block overflow-x-auto text-center">${renderMath(m[2], true)}</span>`;
     } else if (m[3] !== undefined) {
       out += `<span class="mx-1 inline-flex min-w-14 items-center justify-center border-b border-line-strong px-2 font-mono text-xs text-faint">${escapeHtml(m[3])}</span>`;
     } else {

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import clsx from "clsx";
 import { Check, X } from "lucide-react";
 import { plotGeometry, PLOT_H, PLOT_W, type PlotWindow } from "@/lib/plot";
+import { useCoarsePointer } from "@/lib/use-coarse-pointer";
 
 export type Point = { x: number; y: number };
 
@@ -39,11 +40,12 @@ export function GraphPointsInput({
   graded?: Point[];
 }) {
   const [hover, setHover] = useState<string | null>(null);
+  const coarse = useCoarsePointer();
   const g = useMemo(() => plotGeometry(win), [win]);
 
   // One button per lattice point. Capped so a wide window degrades to a
   // coarser grid rather than rendering thousands of targets.
-  const lattice = useMemo(() => {
+  const { lattice, hitR } = useMemo(() => {
     const out: Point[] = [];
     const stepX = Math.max(1, Math.ceil((win.xMax - win.xMin) / 24));
     const stepY = Math.max(1, Math.ceil((win.yMax - win.yMin) / 24));
@@ -52,8 +54,24 @@ export function GraphPointsInput({
         out.push({ x, y });
       }
     }
-    return out;
-  }, [win]);
+
+    /**
+     * The hit radius is derived from the lattice pitch rather than being a
+     * constant, and the pitch is the hard ceiling here — a 44px target is
+     * arithmetically impossible. At 390px this plot draws about 350 CSS px
+     * wide, so a typical -10..10 window puts neighbouring points ~16 CSS px
+     * apart; anything past 45% of that overlaps the point next door, and an
+     * ambiguous tap on a graded answer is worse than a small one. Coarsening
+     * the lattice would buy room by *removing selectable answers*, which is a
+     * grading bug, so it stays.
+     */
+    const gm = plotGeometry(win);
+    const pitch = Math.min(
+      Math.abs(gm.toPxX(win.xMin + stepX) - gm.toPxX(win.xMin)),
+      Math.abs(gm.toPxY(win.yMin + stepY) - gm.toPxY(win.yMin))
+    );
+    return { lattice: out, hitR: Math.min(coarse ? 22 : 9, pitch * 0.45) };
+  }, [win, coarse]);
 
   const picked = new Set(selected.map(key));
   const truth = graded ? new Set(graded.map(key)) : null;
@@ -64,7 +82,10 @@ export function GraphPointsInput({
         {truth ? "Your selection" : "Click the points being asked for"}
       </p>
 
-      <div className="relative overflow-hidden rounded-[3px] border border-line bg-surface">
+      {/* Full-bleed against the card's `p-6` on a phone. 48px of extra width
+          is 14% more space between lattice points, which is the only lever
+          that makes the targets bigger without making them ambiguous. */}
+      <div className="relative -mx-6 overflow-hidden border-y border-line bg-surface sm:mx-0 sm:rounded-[3px] sm:border-x">
         {/* Not `aria-hidden`. The server-rendered plot carries its own
             `role="img"` and a description of the curve and axes — the stimulus
             — while the overlay below names the controls. They describe
@@ -96,6 +117,12 @@ export function GraphPointsInput({
             // Unselected points stay nearly invisible until hovered or focused;
             // drawing every candidate at full strength would bury the curve
             // under its own coordinate grid.
+            //
+            // That reasoning holds only where there is a hover to reveal them
+            // with. On touch there is none, so the fallback state *is* the
+            // state — the prompt said "click the points being asked for" over
+            // a plot that, at 18% opacity and r=3, rendered as blank paper.
+            // Drawn stronger there, still below the curve's weight.
             const visible = isPicked || state !== null || hover === k;
 
             return (
@@ -103,7 +130,7 @@ export function GraphPointsInput({
                 <circle
                   cx={g.toPxX(p.x)}
                   cy={g.toPxY(p.y)}
-                  r={visible ? 5 : 3}
+                  r={visible ? 5 : coarse ? 4 : 3}
                   className={clsx(
                     "transition-all",
                     state === "got" && "fill-[var(--ok)]",
@@ -112,22 +139,25 @@ export function GraphPointsInput({
                     !state && isPicked && "fill-[var(--accent-solid)]",
                     !state && !isPicked && "fill-[var(--fg-faint)]"
                   )}
-                  opacity={visible ? 1 : 0.18}
+                  opacity={visible ? 1 : coarse ? 0.42 : 0.18}
                   strokeWidth={1.5}
                 />
                 {!disabled && (
                   <circle
                     cx={g.toPxX(p.x)}
                     cy={g.toPxY(p.y)}
-                    r={9}
+                    r={hitR}
                     fill="transparent"
                     tabIndex={0}
                     role="button"
                     aria-pressed={isPicked}
                     aria-label={`Point ${p.x}, ${p.y}`}
-                    className="cursor-pointer outline-none focus-visible:stroke-[var(--accent)] focus-visible:[stroke-width:2]"
-                    onMouseEnter={() => setHover(k)}
-                    onMouseLeave={() => setHover(null)}
+                    // `touch-none` on the targets only, never on the overlay:
+                    // put it on the full-size SVG and the whole plot becomes a
+                    // band of screen that refuses to scroll.
+                    className="cursor-pointer touch-none outline-none focus-visible:stroke-[var(--accent)] focus-visible:[stroke-width:2]"
+                    onPointerEnter={() => setHover(k)}
+                    onPointerLeave={() => setHover(null)}
                     onFocus={() => setHover(k)}
                     onBlur={() => setHover(null)}
                     onClick={() => onToggle(p)}
@@ -146,13 +176,33 @@ export function GraphPointsInput({
       </div>
 
       {/* Coordinates in text, so the selection is legible without reading pixels
-          — and so a screen reader user has the answer stated, not just plotted. */}
+          — and so a screen reader user has the answer stated, not just plotted.
+
+          Each one is also a button while the problem is live. The lattice pitch
+          caps a target at about 14px on a phone, so a mis-tap is likely; undoing
+          it by hitting the same 14px target again is the part that would make
+          this format miserable. Here the thing you just selected is a full-size
+          control, and it names itself. */}
       <p className="mono-meta mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
           Selected:{" "}
-          {selected.length > 0
-            ? selected.map((p) => `(${p.x}, ${p.y})`).join("  ")
-            : "none yet"}
+          {selected.length === 0 && "none yet"}
+          {selected.map((p) =>
+            disabled ? (
+              <span key={key(p)}>{`(${p.x}, ${p.y})`}</span>
+            ) : (
+              <button
+                key={key(p)}
+                type="button"
+                onClick={() => onToggle(p)}
+                aria-label={`Remove point ${p.x}, ${p.y}`}
+                className="chip gap-1 py-1 font-mono text-[11px] tracking-normal"
+              >
+                {`(${p.x}, ${p.y})`}
+                <X className="h-3 w-3" aria-hidden />
+              </button>
+            )
+          )}
         </span>
         {truth && (
           <span className="flex items-center gap-1.5 text-ok">

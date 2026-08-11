@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import clsx from "clsx";
-import { Check, HelpCircle, Loader2, Minus, Upload, X } from "lucide-react";
+import { Camera, Check, HelpCircle, Loader2, Minus, Upload, X } from "lucide-react";
 import { wasAttempted } from "@/lib/scan-marks";
 import type { ScanMark } from "@/lib/ai/grade-scan";
 import type { WorksheetGrading } from "@/lib/worksheets";
 
-/** Kept in step with the storage policy's `${userId}/...` prefix. */
-const ACCEPTED = "image/jpeg,image/png,image/webp,image/heic";
+/** Kept in step with the storage policy's `${userId}/...` prefix.
+ *  `heif` alongside `heic`: iOS reports some camera captures as the former,
+ *  and a picker that greys the photo out is indistinguishable from a bug. */
+const ACCEPTED = "image/jpeg,image/png,image/webp,image/heic,image/heif";
 const MAX_PAGES = 8;
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -136,31 +138,59 @@ export function ScanWorkspace({
     <div className="space-y-10">
       {phase !== "done" && (
         <section>
-          <label
-            className={clsx(
-              "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-[3px] border border-dashed px-6 py-12 text-center transition-colors",
-              busy ? "border-line opacity-60" : "border-line-strong hover:border-accent"
-            )}
-          >
-            <Upload className="h-5 w-5 text-faint" aria-hidden />
-            <span className="text-sm text-muted">
-              {files.length === 0
-                ? "Photograph your worked page, or choose a file"
-                : `${files.length} page${files.length === 1 ? "" : "s"} ready`}
-            </span>
-            <span className="mono-meta">
-              Up to {MAX_PAGES} pages · this set has {problemCount} problems
-            </span>
-            <input
-              type="file"
-              accept={ACCEPTED}
-              multiple
-              capture="environment"
-              disabled={busy}
-              className="sr-only"
-              onChange={(e) => addFiles(e.target.files)}
-            />
-          </label>
+          {/* Two controls, not one.
+              `capture` and `multiple` on the same input contradict each other,
+              and the browser resolves it by opening the camera and hiding the
+              photo library — so a student who had already photographed the
+              page, which is the likeliest way this gets used, could not submit
+              it, and "up to 8 pages" meant eight trips through the camera. The
+              materials uploader never had `capture` and was right; here the
+              camera is worth keeping as its own button. */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label
+              className={clsx(
+                "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-[3px] border border-dashed px-6 py-12 text-center transition-colors",
+                busy ? "border-line opacity-60" : "border-line-strong hover:border-accent"
+              )}
+            >
+              <Camera className="h-5 w-5 text-faint" aria-hidden />
+              <span className="text-sm text-muted">Take a photo</span>
+              <span className="mono-meta">one page at a time</span>
+              <input
+                type="file"
+                accept={ACCEPTED}
+                capture="environment"
+                disabled={busy}
+                className="sr-only"
+                onChange={(e) => addFiles(e.target.files)}
+              />
+            </label>
+
+            <label
+              className={clsx(
+                "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-[3px] border border-dashed px-6 py-12 text-center transition-colors",
+                busy ? "border-line opacity-60" : "border-line-strong hover:border-accent"
+              )}
+            >
+              <Upload className="h-5 w-5 text-faint" aria-hidden />
+              <span className="text-sm text-muted">Choose photos</span>
+              <span className="mono-meta">from your library or files</span>
+              <input
+                type="file"
+                accept={ACCEPTED}
+                multiple
+                disabled={busy}
+                className="sr-only"
+                onChange={(e) => addFiles(e.target.files)}
+              />
+            </label>
+          </div>
+
+          <p className="mono-meta mt-3 text-center">
+            {files.length === 0
+              ? `Up to ${MAX_PAGES} pages · this set has ${problemCount} problems`
+              : `${files.length} page${files.length === 1 ? "" : "s"} ready · up to ${MAX_PAGES}`}
+          </p>
 
           {files.length > 0 && (
             <ul className="mt-4 space-y-2">

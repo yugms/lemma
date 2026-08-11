@@ -112,9 +112,13 @@ export function SetRow({ set }: { set: SetRowData }) {
               type="button"
               onClick={() => setConfirming(true)}
               aria-label={`Delete ${set.title}`}
-              // Hidden until hover on pointer devices, but always reachable
-              // by keyboard — opacity, not display.
-              className="rounded-[3px] p-2 text-faint opacity-0 transition-all hover:text-bad focus-visible:opacity-100 group-hover:opacity-100"
+              // Hidden until hover on pointer devices, but always reachable by
+              // keyboard — opacity, not display. Tailwind scopes `group-hover`
+              // to `@media (hover: hover)`, which is correct and was also the
+              // problem: on a phone the hover never arrives, so this was not a
+              // hard control to find, it was one that could not be reached at
+              // all. Shown outright where there is no hover to wait for.
+              className="tap-44 rounded-[3px] p-2 text-faint opacity-0 transition-all hover:text-bad focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
             >
               <Trash2 className="h-3.5 w-3.5" aria-hidden />
             </button>

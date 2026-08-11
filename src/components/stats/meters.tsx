@@ -83,18 +83,25 @@ export function ActivityStrip({
 
   return (
     <div>
-      <div className="flex h-16 items-end gap-[3px]" aria-hidden>
-        {activity.map((d) => {
-          const n = d.answered + d.revealed;
-          return (
-            <div
-              key={d.date}
-              title={`${d.date}: ${n} problem${n === 1 ? "" : "s"}`}
-              className={`min-w-0 flex-1 rounded-[1px] ${n > 0 ? "bg-fg" : "bg-line"}`}
-              style={{ height: n > 0 ? `${Math.max(8, (n / peak) * 100)}%` : "2px" }}
-            />
-          );
-        })}
+      {/* Scrolls rather than compressing. Thirty bars in a 350px column is
+          8.8px each, and the only per-day detail is the `title` tooltip, which
+          a touch screen has no way to open — so on a phone the compressed
+          version carried no information the sentence below doesn't. A minimum
+          bar width keeps the shape readable and lets the reader pan. */}
+      <div className="-mx-5 overflow-x-auto px-5 sm:mx-0 sm:overflow-visible sm:px-0">
+        <div className="flex h-16 min-w-[26rem] items-end gap-[3px] sm:min-w-0" aria-hidden>
+          {activity.map((d) => {
+            const n = d.answered + d.revealed;
+            return (
+              <div
+                key={d.date}
+                title={`${d.date}: ${n} problem${n === 1 ? "" : "s"}`}
+                className={`min-w-0 flex-1 rounded-[1px] ${n > 0 ? "bg-fg" : "bg-line"}`}
+                style={{ height: n > 0 ? `${Math.max(8, (n / peak) * 100)}%` : "2px" }}
+              />
+            );
+          })}
+        </div>
       </div>
       <p className="mono-meta mt-3">
         {total} problem{total === 1 ? "" : "s"} across {days} day{days === 1 ? "" : "s"} · last 30 days

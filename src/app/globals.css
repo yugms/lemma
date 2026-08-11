@@ -220,6 +220,27 @@
     font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: "cv11", "ss01";
     text-rendering: optimizeLegibility;
+    /* One rule covers the landscape notch for every route. Inert unless
+       `viewport.viewportFit` is "cover" — see layout.tsx. */
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  /* Installed to the home screen there is no browser chrome above the header,
+     so the header itself has to own the status-bar gap. */
+  @media (display-mode: standalone) {
+    .site-header > div {
+      padding-top: env(safe-area-inset-top, 0px);
+    }
+  }
+
+  /* A long unbroken token — a URL in a note, a pasted expression — is the one
+     thing that still escapes a container the layout got right. */
+  p,
+  li,
+  dd,
+  summary {
+    overflow-wrap: anywhere;
   }
 
   /* Paper grain. One 220px tile repeated on a fixed layer, so the whole
@@ -260,9 +281,20 @@
      small next to 15–17px prose. */
   .katex {
     font-size: 1.05em;
+    max-width: 100%;
   }
+  /* A long chain, a matrix or a system is wider than a phone, and KaTeX lays
+     out at its intrinsic width — so without a scroll port here the equation
+     pushed the whole document sideways and the right-hand side was
+     unreachable. `overscroll-behavior-x` is the other half: without it a fling
+     that reaches the end of the equation continues into the browser's back
+     gesture, mid-problem. */
   .katex-display {
     margin: 0.9rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    padding-block: 0.35rem;
   }
 
   input,
@@ -383,6 +415,13 @@
     cursor: not-allowed;
   }
 
+  /* Tailwind scopes its own `hover:` variant to `@media (hover: hover)`, so
+     every hover utility in the JSX is already touch-safe. The hand-written
+     rules below are not: on a touch screen `:hover` latches on tap and stays
+     there until something else is tapped, so a button the reader has finished
+     with goes on looking like the one under their finger. Each is wrapped at
+     its own declaration rather than undone afterwards. */
+
   /* Primary. The border is load-bearing in dark mode, where the oxblood
      fill sits under 3:1 against the paper on its own. */
   .btn-accent {
@@ -391,19 +430,23 @@
     color: var(--accent-on);
     box-shadow: inset 0 1px 0 rgb(var(--sheen) / 0.12);
   }
-  .btn-accent:not(:disabled):hover {
-    background: color-mix(in oklab, var(--accent-solid) 88%, var(--fg));
-    box-shadow:
-      inset 0 1px 0 rgb(var(--sheen) / 0.16),
-      0 4px 14px -6px color-mix(in oklab, var(--accent-solid) 60%, transparent);
+  @media (hover: hover) {
+    .btn-accent:not(:disabled):hover {
+      background: color-mix(in oklab, var(--accent-solid) 88%, var(--fg));
+      box-shadow:
+        inset 0 1px 0 rgb(var(--sheen) / 0.16),
+        0 4px 14px -6px color-mix(in oklab, var(--accent-solid) 60%, transparent);
+    }
   }
 
   .btn-solid {
     background: var(--solid);
     color: var(--on-solid);
   }
-  .btn-solid:not(:disabled):hover {
-    background: color-mix(in oklab, var(--solid) 84%, var(--paper));
+  @media (hover: hover) {
+    .btn-solid:not(:disabled):hover {
+      background: color-mix(in oklab, var(--solid) 84%, var(--paper));
+    }
   }
 
   .btn-outline {
@@ -411,18 +454,22 @@
     border-color: var(--line-strong);
     color: var(--fg);
   }
-  .btn-outline:not(:disabled):hover {
-    border-color: var(--accent);
-    color: var(--accent);
+  @media (hover: hover) {
+    .btn-outline:not(:disabled):hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
   }
 
   .btn-ghost {
     color: var(--fg-muted);
     padding: 0 0.5rem;
   }
-  .btn-ghost:not(:disabled):hover {
-    color: var(--fg);
-    background: var(--sunk);
+  @media (hover: hover) {
+    .btn-ghost:not(:disabled):hover {
+      color: var(--fg);
+      background: var(--sunk);
+    }
   }
 
   .btn-lg {
@@ -454,8 +501,10 @@
     transition: background-size 0.28s var(--ease-out-expo);
     padding-bottom: 1px;
   }
-  .link:hover {
-    background-size: 100% 1px;
+  @media (hover: hover) {
+    .link:hover {
+      background-size: 100% 1px;
+    }
   }
 
   /* ── Controls ─────────────────────────────────────────────────── */
@@ -483,9 +532,11 @@
       color 0.18s ease,
       transform 0.18s var(--ease-out-quint);
   }
-  .chip:not(:disabled):hover {
-    border-color: var(--accent-line);
-    color: var(--fg);
+  @media (hover: hover) {
+    .chip:not(:disabled):hover {
+      border-color: var(--accent-line);
+      color: var(--fg);
+    }
   }
   .chip:not(:disabled):active {
     transform: scale(0.97);
@@ -599,6 +650,52 @@
     animation: sweep 1.6s linear infinite;
   }
 
+  /* ── Phone navigation ─────────────────────────────────────────── */
+
+  /* Thumb-reachable, and unlike the header it never competes with the
+     wordmark for width. Gated at `md` to match `hidden md:flex` on the header
+     nav, so the two navigations can never both be absent. */
+  .mobile-tabs {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 40;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    border-top: 1px solid var(--line);
+    background: color-mix(in oklab, var(--paper) 88%, transparent);
+    backdrop-filter: blur(12px) saturate(1.5);
+    /* Inert without `viewport.viewportFit = "cover"` — see layout.tsx. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .mobile-tabs a {
+    display: grid;
+    place-items: center;
+    gap: 0.2rem;
+    min-height: 3.5rem;
+    padding-block: 0.5rem;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--fg-muted);
+    transition: color 0.18s ease;
+  }
+  .mobile-tabs a[aria-current="page"] {
+    color: var(--accent);
+  }
+
+  .mobile-tabs-spacer {
+    height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (width >= 48rem) {
+    .mobile-tabs,
+    .mobile-tabs-spacer {
+      display: none;
+    }
+  }
+
   /* ── Skeletons ────────────────────────────────────────────────── */
 
   .skeleton {
@@ -642,12 +739,14 @@
       box-shadow 0.28s var(--ease-out-quint),
       border-color 0.18s ease;
   }
-  .lift:hover {
-    transform: translateY(-2px);
-    border-color: var(--accent-line);
-    box-shadow:
-      0 1px 2px rgb(var(--shadow-color) / 0.05),
-      0 12px 28px -14px rgb(var(--shadow-color) / 0.16);
+  @media (hover: hover) {
+    .lift:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent-line);
+      box-shadow:
+        0 1px 2px rgb(var(--shadow-color) / 0.05),
+        0 12px 28px -14px rgb(var(--shadow-color) / 0.16);
+    }
   }
 
   /* Enter animation for content that mounts after an interaction. */
@@ -784,6 +883,20 @@
   animation: none;
 }
 
+/* Same pin for the phone bar, and for the same reason: a fixed element that
+   is not named gets captured in the root snapshot and slides with the page
+   content on every navigation. */
+::view-transition-group(mobile-tabs) {
+  animation: none;
+  z-index: 100;
+}
+::view-transition-old(mobile-tabs) {
+  display: none;
+}
+::view-transition-new(mobile-tabs) {
+  animation: none;
+}
+
 @keyframes vt-fade {
   from {
     opacity: 0;
@@ -849,6 +962,80 @@
   }
 }
 
+/* ── Touch ──────────────────────────────────────────────────────────────
+   Sized by input device rather than by viewport width. A 1024px tablet takes
+   taps and a 380px browser window on a laptop does not, so `pointer: coarse`
+   is the honest question — and it means the desktop rendering is untouched
+   rather than merely narrower.
+
+   Unlayered on purpose, and this is load-bearing. `.btn` / `.chip` / `.field`
+   are declared in `@layer components`, Tailwind's own utilities sit in the
+   later `@layer utilities`, and a later layer wins regardless of specificity.
+   So `class="field text-sm"` at a call site beats anything written inside a
+   layer here — the input stays at 14px, and iOS Safari zooms the page on
+   focus and never zooms back. Unlayered declarations outrank every layer,
+   which is how this wins without `!important`.                            */
+
+@media (pointer: coarse) {
+  .btn {
+    height: 2.75rem;
+    padding-inline: 1.25rem;
+  }
+  .btn-lg {
+    height: 3.25rem;
+  }
+  .btn-sm {
+    height: 2.5rem;
+    padding-inline: 0.9rem;
+  }
+  .btn-icon {
+    height: 2.75rem;
+    width: 2.75rem;
+    padding: 0;
+  }
+  .btn-ghost {
+    padding-inline: 0.75rem;
+  }
+
+  .chip {
+    padding: 0.7rem 0.95rem;
+    font-size: 0.875rem;
+  }
+
+  /* Exactly 16px, and not a fraction less: below it iOS zooms the viewport on
+     focus, which pushes the control that submits the answer off-screen. */
+  .field {
+    font-size: 16px;
+    padding: 0.8rem 0.9rem;
+    /* Keeps the action row clear of the field when Safari scrolls a focused
+       input into view. */
+    scroll-margin-bottom: 6rem;
+  }
+
+  /* 3px is a hairline under a mouse and invisible at arm's length — and this
+     is the only feedback during a two-minute generation. */
+  .meter {
+    height: 5px;
+  }
+
+  /* Grows the hit area without moving the drawn one, for the controls whose
+     size is the design (the 28px theme keys, an icon in a row). Not for
+     controls that sit closer together than 44px — two overlapping areas make
+     a tap ambiguous, which is worse than a small one. */
+  .tap-44 {
+    position: relative;
+  }
+  .tap-44::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    translate: -50% -50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+  }
+}
+
 /* ── Print ──────────────────────────────────────────────────────────────
    Worksheets (/set/[id]/print) are the reason this exists, but it applies
    everywhere — printing any page should produce the content, not the
@@ -901,9 +1088,14 @@
     --grain-opacity: 0;
   }
 
-  /* The app frame is navigation, and navigation does not print. */
+  /* The app frame is navigation, and navigation does not print. The tab bar
+     belongs on this list as much as the header does — /print already hides it
+     by route, but any other page sent to a printer would otherwise carry a
+     nav bar across the bottom of page one. */
   .site-header,
   body > footer,
+  .mobile-tabs,
+  .mobile-tabs-spacer,
   .print\:hidden {
     display: none !important;
   }

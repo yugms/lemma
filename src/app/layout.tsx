@@ -4,12 +4,16 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { Geist, Geist_Mono, Fraunces } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
+import { MobileTabBar } from "@/components/mobile-tab-bar";
 import { THEME_SCRIPT } from "@/components/theme-toggle";
 import { Wordmark } from "@/components/brand";
 import { JsonLd, siteGraph } from "@/components/json-ld";
 import { getCurrentUser, toHeaderUser } from "@/lib/auth-server";
 import { loadActiveSession } from "@/lib/study-session";
 import { siteUrl } from "@/lib/env";
+// Shared with manifest.ts: in standalone these paint adjacent surfaces, and
+// they used to disagree.
+import { THEME_COLORS } from "@/lib/theme-color";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -84,12 +88,35 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * `width=device-width, initial-scale=1` is Next's own default and is left
+ * alone; `maximumScale` / `userScalable` are deliberately *not* set, because
+ * blocking pinch-zoom is an accessibility failure and the layout no longer
+ * needs it.
+ *
+ * The two additions both do real work:
+ *
+ * `viewportFit: "cover"` is what makes `env(safe-area-inset-*)` resolve to
+ * anything at all. Without it every safe-area rule in globals.css silently
+ * evaluates to 0 — the tab bar sits under the home indicator and the header
+ * under the notch, with nothing in the CSS to suggest why.
+ *
+ * `interactiveWidget: "resizes-content"` shrinks the *layout* viewport when
+ * the soft keyboard opens, which is what puts a sticky bottom bar above the
+ * keyboard rather than behind it. Chrome-on-Android honours it; iOS Safari
+ * does not, which is why the answer controls sit next to the field rather
+ * than relying on this alone. It reflows on every keyboard open, and the one
+ * `100vh` in the app (global-error.tsx) is a page with no inputs, so that
+ * costs nothing here.
+ */
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#faf7f0" },
-    { media: "(prefers-color-scheme: dark)", color: "#0e0c0a" },
+    { media: "(prefers-color-scheme: light)", color: THEME_COLORS.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_COLORS.dark },
   ],
   colorScheme: "light dark",
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 const FOOTER_LINKS = [
@@ -135,7 +162,10 @@ export default async function RootLayout({
         <script nonce={nonce ?? undefined} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <JsonLd data={siteGraph(SITE_URL, SITE_DESCRIPTION)} nonce={nonce} />
       </head>
-      <body className="flex min-h-full flex-col">
+      {/* `dvh` rather than `min-h-full`: on a phone the browser's own chrome
+          collapses as you scroll, and a viewport-height unit that ignores it
+          leaves the footer floating short of the bottom. */}
+      <body className="flex min-h-dvh flex-col">
         <a
           href="#main"
           className="sr-only z-50 focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:rounded-[3px] focus:bg-accent-solid focus:px-4 focus:py-2 focus:text-sm focus:text-accent-on"
@@ -197,6 +227,12 @@ export default async function RootLayout({
             </nav>
           </div>
         </footer>
+
+        {/* After the footer on purpose: the spacer it renders adds its height
+            at the end of the document, which is what lets the footer scroll
+            clear of a fixed bar without <main> or the footer knowing the bar
+            is there. */}
+        <MobileTabBar user={user} />
       </body>
     </html>
   );

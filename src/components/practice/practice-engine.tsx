@@ -403,7 +403,15 @@ export function PracticeEngine({
           <span className="truncate">{set.title}</span>
         </Link>
 
-        <nav aria-label="Problems" className="flex shrink-0 gap-1">
+        {/* A set runs to MAX_COUNT = 15 (src/lib/sets.ts), which at the old
+            `w-5 shrink-0` needed ~371px of un-shrinkable rail beside a title
+            in a 335px box. It scrolls instead, and the pitch is 24px so
+            adjacent targets are tangent rather than overlapping — the `sm:w-6`
+            was backwards, widening the dots on the screen that had room. */}
+        <nav
+          aria-label="Problems"
+          className="-mr-5 flex max-w-[55%] shrink-0 gap-1 overflow-x-auto pr-5 [scrollbar-width:none] sm:mr-0 sm:max-w-none sm:overflow-visible sm:pr-0"
+        >
           {problems.map((p, i) => {
             const tone = toneFor(outcomes[p.id], i === current);
             return (
@@ -413,11 +421,11 @@ export function PracticeEngine({
                 onClick={() => go(i)}
                 aria-current={i === current ? "step" : undefined}
                 aria-label={`Problem ${i + 1}, ${tone.label}`}
-                className="group -my-2 px-px py-2"
+                className="group -my-2 shrink-0 px-1 py-3"
               >
                 <span
                   className={clsx(
-                    "block h-[3px] w-5 rounded-full transition-all duration-300 group-hover:h-[5px] sm:w-6",
+                    "block h-[3px] w-4 rounded-full transition-all duration-300 group-hover:h-[5px] sm:w-6",
                     tone.className,
                     i === current && "h-[5px]"
                   )}
@@ -477,7 +485,7 @@ export function PracticeEngine({
         />
       </div>
 
-      <div className="mt-6 flex items-center justify-between gap-4">
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <button
           type="button"
           onClick={() => go(current - 1)}
@@ -489,7 +497,10 @@ export function PracticeEngine({
         </button>
 
         <div className="flex items-center gap-3">
-          <span className="mono-meta hidden sm:inline">
+          {/* Was `hidden sm:inline` back when the dot rail always showed every
+              problem at once. It scrolls now, so this is the only place the
+              count is stated in full on a phone. */}
+          <span className="mono-meta">
             {tally.correct + tally.wrong + tally.revealed} / {problems.length} done
           </span>
           {current + 1 < problems.length ? (

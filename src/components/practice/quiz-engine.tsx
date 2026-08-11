@@ -124,7 +124,12 @@ export function QuizEngine({
           <span className="truncate text-faint">· {set.title}</span>
         </span>
 
-        <nav aria-label="Questions" className="flex shrink-0 gap-1">
+        {/* Scrolls rather than overflowing — see the note in
+            practice-engine.tsx, which carries the same rail. */}
+        <nav
+          aria-label="Questions"
+          className="-mr-5 flex max-w-[55%] shrink-0 gap-1 overflow-x-auto pr-5 [scrollbar-width:none] sm:mr-0 sm:max-w-none sm:overflow-visible sm:pr-0"
+        >
           {problems.map((p, i) => (
             <button
               key={p.id}
@@ -132,11 +137,11 @@ export function QuizEngine({
               onClick={() => go(i)}
               aria-current={i === current ? "step" : undefined}
               aria-label={`Question ${i + 1}, ${answered[p.id] ? "answered" : "unanswered"}`}
-              className="group -my-2 px-px py-2"
+              className="group -my-2 shrink-0 px-1 py-3"
             >
               <span
                 className={clsx(
-                  "block h-[3px] w-5 rounded-full transition-all duration-300 group-hover:h-[5px] sm:w-6",
+                  "block h-[3px] w-4 rounded-full transition-all duration-300 group-hover:h-[5px] sm:w-6",
                   answered[p.id] ? "bg-fg" : "bg-line",
                   i === current && "h-[5px]"
                 )}
@@ -170,7 +175,9 @@ export function QuizEngine({
         />
       </div>
 
-      <div className="mt-6 flex items-center justify-between gap-4">
+      {/* Wraps because this row carries four things — Previous, the tally,
+          Skip and Hand in — and at touch sizing they need ~410px. */}
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <button
           type="button"
           onClick={() => go(current - 1)}
@@ -182,7 +189,8 @@ export function QuizEngine({
         </button>
 
         <div className="flex items-center gap-3">
-          <span className="mono-meta hidden sm:inline">
+          {/* See the note on the same line in practice-engine.tsx. */}
+          <span className="mono-meta">
             {done} / {problems.length} answered
           </span>
           {current + 1 < problems.length ? (

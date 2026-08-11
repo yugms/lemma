@@ -216,7 +216,9 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
               disabled={busy}
               aria-label="Filter topics by unit"
               onChange={(e) => setUnitId(e.target.value)}
-              className="field w-auto appearance-none py-2 pl-3 pr-10 text-sm"
+              // No `text-sm`: iOS zooms the viewport on select focus too, and
+              // this is the first control a new visitor touches.
+              className="field w-auto appearance-none py-2 pl-3 pr-10 sm:text-sm"
             >
               <option value="all">All units</option>
               {course.units.map((u) => (
@@ -336,7 +338,8 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
               aria-label={`Level ${d} — ${DIFFICULTY_LABELS[d]}`}
               disabled={busy}
               onClick={() => setDifficulty(d)}
-              className="chip h-9 w-9 justify-center px-0 font-mono"
+              // Fixed square, so the coarse `.chip` padding would fight it.
+              className="chip h-9 w-9 justify-center px-0 font-mono pointer-coarse:h-11 pointer-coarse:w-11"
             >
               {d}
             </button>
@@ -366,16 +369,23 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
                       : "border-line-strong bg-surface group-hover:border-accent"
                   )}
                 />
-                <span
-                  className={clsx(
-                    "w-32 shrink-0 text-sm transition-colors",
-                    on ? "text-fg" : "text-muted"
-                  )}
-                >
-                  {STYLE_LABELS[s.id]}
-                </span>
-                <span className="hidden flex-1 text-[13px] leading-relaxed text-faint sm:block">
-                  {s.desc}
+                {/* Stacked below the label on a phone rather than hidden. The
+                    description was `hidden sm:block`, which left mobile with
+                    "Drill / Word / Conceptual / Proof / Error analysis" and
+                    nothing to say what any of them meant — the one thing on
+                    this row a first-time builder actually needs. */}
+                <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:gap-4">
+                  <span
+                    className={clsx(
+                      "text-sm transition-colors sm:w-32 sm:shrink-0",
+                      on ? "text-fg" : "text-muted"
+                    )}
+                  >
+                    {STYLE_LABELS[s.id]}
+                  </span>
+                  <span className="flex-1 text-[13px] leading-relaxed text-faint">
+                    {s.desc}
+                  </span>
                 </span>
               </button>
             );
