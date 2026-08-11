@@ -119,6 +119,9 @@ describe("canonical site URL", () => {
     "NEXT_PUBLIC_SITE_URL",
     "VERCEL_PROJECT_PRODUCTION_URL",
     "VERCEL_URL",
+    // Decides whether a deployment is allowed to answer with its own host, so
+    // it has to be cleared between cases like the rest.
+    "VERCEL_ENV",
   ] as const;
   const saved = Object.fromEntries(HOST_VARS.map((k) => [k, process.env[k]]));
 
@@ -158,6 +161,30 @@ describe("canonical site URL", () => {
     clear();
     process.env.VERCEL_URL = "lemma-abc123.vercel.app";
     expect(siteUrl()).toBe("https://lemma-abc123.vercel.app");
+  });
+
+  it("lets a preview describe itself even when a site URL is configured", () => {
+    // The case the ordering used to get wrong. NEXT_PUBLIC_SITE_URL is set once
+    // per Vercel project and applies to every environment, so with the explicit
+    // value checked first every preview answered with the production origin —
+    // a robots.txt pointing at the real sitemap, canonicals claiming the real
+    // pages, and a link to the preview unfurling as the live site.
+    clear();
+    process.env.VERCEL_ENV = "preview";
+    process.env.NEXT_PUBLIC_SITE_URL = "https://lemma.example";
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = "lemma.vercel.app";
+    process.env.VERCEL_URL = "lemma-abc123.vercel.app";
+    expect(siteUrl()).toBe("https://lemma-abc123.vercel.app");
+  });
+
+  it("still prefers the configured site URL in production", () => {
+    // Only `VERCEL_ENV` separates the two — both host variables are set on a
+    // preview build as well, so the branch above must not catch production.
+    clear();
+    process.env.VERCEL_ENV = "production";
+    process.env.NEXT_PUBLIC_SITE_URL = "https://lemma.example";
+    process.env.VERCEL_URL = "lemma-abc123.vercel.app";
+    expect(siteUrl()).toBe("https://lemma.example");
   });
 
   it("never invents a host it does not serve", () => {

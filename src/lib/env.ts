@@ -98,15 +98,34 @@ export function turnstileSiteKey(): string | null {
  * from a client component.
  */
 export function siteUrl(): string {
+  const deploymentHost = process.env.VERCEL_URL;
+
+  /**
+   * A preview describes itself, ahead of anything configured — and this has to
+   * come first, not last, which is the correction here.
+   *
+   * The rule below already said a preview must not claim the production
+   * origin, and the ordering defeated it. `NEXT_PUBLIC_SITE_URL` is set once
+   * for a Vercel project and applies to every environment, so as soon as it is
+   * set — which is the recommended setup — every preview deployment answered
+   * with the production URL. Each one then served a `robots.txt` pointing at
+   * the real sitemap, canonicals claiming the real pages, and OG tags that
+   * made a link to the preview unfurl as the live site.
+   *
+   * Checked on `VERCEL_ENV` rather than on the absence of the production
+   * variable, because both are set on a preview build; only `VERCEL_ENV`
+   * distinguishes one.
+   */
+  if (process.env.VERCEL_ENV === "preview" && deploymentHost) {
+    return `https://${deploymentHost}`;
+  }
+
   const explicit = process.env.NEXT_PUBLIC_SITE_URL;
   if (explicit) return withoutTrailingSlash(explicit);
 
   const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
   if (productionHost) return `https://${productionHost}`;
 
-  // A preview deployment describes itself; a preview must not claim to be the
-  // production origin, or its metadata competes with the real site's.
-  const deploymentHost = process.env.VERCEL_URL;
   if (deploymentHost) return `https://${deploymentHost}`;
 
   if (process.env.NODE_ENV === "production") warnOnce();
