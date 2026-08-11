@@ -6,6 +6,7 @@ import { Geist, Geist_Mono, Fraunces } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { THEME_SCRIPT } from "@/components/theme-toggle";
 import { Wordmark } from "@/components/brand";
+import { JsonLd, siteGraph } from "@/components/json-ld";
 import { getCurrentUser, toHeaderUser } from "@/lib/auth-server";
 import { loadActiveSession } from "@/lib/study-session";
 import { siteUrl } from "@/lib/env";
@@ -43,14 +44,16 @@ const fraunces = Fraunces({
 
 const SITE_URL = siteUrl();
 
+const SITE_DESCRIPTION =
+  "Build custom math problem sets by course, topic, and difficulty. Every problem is solved independently by a second model before it reaches you, and comes with a step-by-step solution.";
+
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: "lemma — math practice, generated for you",
     template: "%s · lemma",
   },
-  description:
-    "Build custom math problem sets by course, topic, and difficulty. Every problem is solved independently by a second model before it reaches you, and comes with a step-by-step solution.",
+  description: SITE_DESCRIPTION,
   applicationName: "lemma",
   keywords: [
     "math practice",
@@ -68,7 +71,10 @@ export const metadata: Metadata = {
     title: "lemma — math practice, generated for you",
     description:
       "Problem sets built to order. Pick the topic, difficulty and style; every problem is independently verified.",
-    url: SITE_URL,
+    // Relative for the same reason as the canonical above. Absolute here meant
+    // every page shared the homepage's og:url, so a link to /build previewed as
+    // a link to the site root.
+    url: "./",
   },
   twitter: {
     card: "summary_large_image",
@@ -127,6 +133,7 @@ export default async function RootLayout({
             has to be tagged by hand or the CSP blocks it — and a blocked theme
             script means a flash of the wrong theme on every load. */}
         <script nonce={nonce ?? undefined} dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <JsonLd data={siteGraph(SITE_URL, SITE_DESCRIPTION)} nonce={nonce} />
       </head>
       <body className="flex min-h-full flex-col">
         <a

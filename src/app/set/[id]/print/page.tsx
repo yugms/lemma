@@ -12,7 +12,10 @@ import { AnswerSpace } from "@/components/print/answer-space";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Print" };
+export const metadata: Metadata = {
+  title: "Print",
+  description: "A printable worksheet, with an optional answer key on its own page.",
+};
 
 /**
  * A printable worksheet.

@@ -8,7 +8,10 @@ import { latestUpload } from "@/lib/worksheets";
 import { ScanWorkspace } from "@/components/scan/scan-workspace";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Scan your work" };
+export const metadata: Metadata = {
+  title: "Scan your work",
+  description: "Photograph a worksheet you did on paper and have it marked into the same record as typed practice.",
+};
 
 export default async function ScanPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

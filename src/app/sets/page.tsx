@@ -9,7 +9,11 @@ import { SetRow, type SetRowData } from "@/components/sets/set-row";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "My sets" };
+export const metadata: Metadata = {
+  title: "My sets",
+  description:
+    "Every problem set you've built, newest first, with how far through each one you are.",
+};
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
