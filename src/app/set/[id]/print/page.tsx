@@ -75,7 +75,9 @@ export default async function PrintPage({
         </div>
         {wantsKey && (
           <p className="aside-rule border-bad mt-7 py-1 text-sm text-bad">
-            The answer key is on its own page at the end. Don&apos;t hand this copy out.
+            The answer key prints on its own page at the end. On screen it
+            follows the questions — fold it away if you are working from this.
+            Don&apos;t hand this copy out.
           </p>
         )}
         <hr className="mt-10 border-line" />
@@ -125,11 +127,18 @@ export default async function PrintPage({
         ))}
       </ol>
 
+      {/* `break-before-page` is a print rule, so on screen the key just follows
+          the questions — a scroll away from the paper the student is about to
+          work, on the device they are holding while working it.
+          Foldable rather than folded: a closed <details> prints closed in some
+          browsers and the key is the entire reason for ?key=1, so it opens by
+          default and collapsing is the reader's choice. */}
       {key && key.length > 0 && (
-        <section className="mt-12 break-before-page">
-          <h2 className="display-md border-b border-line pb-3 text-section">
+        <details className="mt-12 break-before-page" open>
+          <summary className="display-md flex flex-wrap items-baseline gap-x-3 border-b border-line pb-3 text-section">
             Answer key — {set.title}
-          </h2>
+            <span className="mono-meta print:hidden">tap to fold away</span>
+          </summary>
           <ol className="mt-6 space-y-4">
             {key.map((entry) => {
               const problem = prepared.find((p) => p.position === entry.position);
@@ -157,7 +166,7 @@ export default async function PrintPage({
               );
             })}
           </ol>
-        </section>
+        </details>
       )}
     </div>
   );

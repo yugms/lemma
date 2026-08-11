@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { THEME_COLORS } from "@/lib/theme-color";
 
 /**
  * What the OS is told when someone installs this to a home screen.
@@ -12,8 +13,8 @@ import type { MetadataRoute } from "next";
  *
  * `theme_color` was oxblood while `viewport.themeColor` in layout.tsx is the
  * paper tone, and the two paint adjacent surfaces in standalone mode — the
- * status bar against the page. They have to agree, and `production.test.ts`
- * now says so.
+ * status bar against the page. Both now read `THEME_COLORS`, so the agreement
+ * is structural rather than something a reviewer has to notice.
  *
  * No `orientation`: the graph inputs and /print are the widest content in the
  * app, and landscape is the only way a phone reaches ~800 CSS px. Locking to
@@ -30,8 +31,8 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     display_override: ["standalone", "minimal-ui"],
-    background_color: "#faf7f0",
-    theme_color: "#faf7f0",
+    background_color: THEME_COLORS.light,
+    theme_color: THEME_COLORS.light,
     icons: [
       { src: "/icon.svg", type: "image/svg+xml", sizes: "any" },
       { src: "/apple-icon", type: "image/png", sizes: "180x180" },

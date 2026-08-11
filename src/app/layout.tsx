@@ -11,6 +11,9 @@ import { JsonLd, siteGraph } from "@/components/json-ld";
 import { getCurrentUser, toHeaderUser } from "@/lib/auth-server";
 import { loadActiveSession } from "@/lib/study-session";
 import { siteUrl } from "@/lib/env";
+// Shared with manifest.ts: in standalone these paint adjacent surfaces, and
+// they used to disagree.
+import { THEME_COLORS } from "@/lib/theme-color";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -108,8 +111,8 @@ export const metadata: Metadata = {
  */
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#faf7f0" },
-    { media: "(prefers-color-scheme: dark)", color: "#0e0c0a" },
+    { media: "(prefers-color-scheme: light)", color: THEME_COLORS.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_COLORS.dark },
   ],
   colorScheme: "light dark",
   viewportFit: "cover",

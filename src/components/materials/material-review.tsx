@@ -144,6 +144,9 @@ export function MaterialReview({
 
       <section className="space-y-3">
         <h2 className="eyebrow">Level</h2>
+        {/* The note is its own block rather than a wrapping member of the chip
+            row: inside the flex it wrapped onto a second line still carrying
+            `ml-2`, which read as an indented orphan under the squares. */}
         <div className="flex flex-wrap items-center gap-2">
           {[1, 2, 3, 4, 5].map((d) => (
             <button
@@ -153,15 +156,15 @@ export function MaterialReview({
               aria-pressed={d === level}
               aria-label={`Level ${d} — ${DIFFICULTY_LABELS[d]}`}
               onClick={() => setLevel(d)}
-              className="chip h-9 w-9 justify-center px-0 font-mono"
+              className="chip h-9 w-9 justify-center px-0 font-mono pointer-coarse:h-11 pointer-coarse:w-11"
             >
               {d}
             </button>
           ))}
-          <span className="ml-2 text-sm text-muted">
-            {DIFFICULTY_LABELS[level]} — {levelNote}
-          </span>
         </div>
+        <p className="text-sm leading-relaxed text-muted">
+          {DIFFICULTY_LABELS[level]} — {levelNote}
+        </p>
       </section>
 
       <section className="space-y-3">

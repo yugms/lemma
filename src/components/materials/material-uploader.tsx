@@ -158,7 +158,9 @@ export function MaterialUploader() {
           rows={6}
           onChange={(e) => setText(e.target.value)}
           placeholder="Paste the problems, the worked examples, or your notes."
-          className="field resize-y font-mono text-sm"
+          // `sm:` on the size, so a phone keeps the 16px that stops iOS
+          // zooming the viewport the moment this is tapped.
+          className="field resize-y font-mono sm:text-sm"
         />
         <p className="mono-meta">Works on its own, or alongside the files above.</p>
       </section>
