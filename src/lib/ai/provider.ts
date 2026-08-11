@@ -1,4 +1,10 @@
-import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+import {
+  GoogleGenAI,
+  HarmBlockThreshold,
+  HarmCategory,
+  ThinkingLevel,
+  type SafetySetting,
+} from "@google/genai";
 import { z, type ZodType } from "zod";
 import { geminiApiKey } from "@/lib/env";
 
@@ -104,13 +110,23 @@ const attemptCap = (budgetMs: number) => Math.max(MIN_ATTEMPT_MS, Math.floor(bud
  * fallback fired, so a slow build and a stalled one looked identical from the
  * outside. This is the only function that talks to the SDK, so it is the only
  * place that has to be instrumented to see all of it.
+ *
+ * The prefix separates on a slash rather than a colon for a reason that has
+ * nothing to do with logging. A bracketed name-colon-value pair is exactly
+ * Tailwind's arbitrary-property syntax, and its class scanner reads every file
+ * in the project — source, comments, this one. It found the old prefix here and
+ * emitted it as a real (invalid) declaration into the stylesheet every visitor
+ * downloads. `@source not` is the documented way to exclude a path and had no
+ * effect under Turbopack, so the fix is to stop writing something that looks
+ * like a utility. Do not spell the old form out anywhere in this repo, comment
+ * or not, or it comes straight back.
  */
 function trace(fields: Record<string, string | number | undefined>): void {
   const line = Object.entries(fields)
     .filter(([, v]) => v !== undefined && v !== "")
     .map(([k, v]) => `${k}=${v}`)
     .join(" ");
-  console.info(`[lemma:ai] ${line}`);
+  console.info(`[lemma/ai] ${line}`);
 }
 
 /**
@@ -224,7 +240,35 @@ export type StructuredCall<T> = {
   thinking?: "low" | "medium";
   /** Total wall clock allowed across all retries and fallback models. */
   budgetMs?: number;
+  /**
+   * Content thresholds for this call only.
+   *
+   * Deliberately per-call rather than a default. The authoring and grading
+   * chains work on maths the app itself produced or a student typed, and
+   * tightening them there buys nothing while risking a false positive on a word
+   * problem about, say, dividing up a hospital's beds. Reading a file somebody
+   * chose is a different proposition, so `STRICT_SAFETY` is set there and
+   * nowhere else.
+   */
+  safety?: SafetySetting[];
 };
+
+/**
+ * Thresholds for a call whose input is a file the caller chose.
+ *
+ * Worth being precise about what this is: a *content policy* gate. It scores
+ * harm categories, and it will not stop "ignore your instructions" — the block
+ * reason list includes JAILBREAK, which helps, but the boundary that actually
+ * holds is `MaterialDigestSchema`, where nothing but closed enums and capped
+ * strings can get out. Anyone weakening the digest because this exists has
+ * traded a wall for a filter.
+ */
+export const STRICT_SAFETY: SafetySetting[] = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+].map((category) => ({ category, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }));
 
 /**
  * One structured-output call, retried across a model chain.
@@ -244,6 +288,7 @@ export async function callStructured<T>({
   maxOutputTokens = 8000,
   thinking = "low",
   budgetMs = DEFAULT_BUDGET_MS,
+  safety,
 }: StructuredCall<T>): Promise<T | null> {
   const ai = getClient();
   const startedAt = Date.now();
@@ -275,6 +320,7 @@ export async function callStructured<T>({
             responseJsonSchema: jsonSchemaFor(schema),
             maxOutputTokens,
             thinkingConfig: thinkingConfigFor(model, thinking),
+            safetySettings: safety,
             abortSignal: AbortSignal.timeout(Math.min(remaining, perAttemptMs)),
           },
         });
@@ -299,7 +345,14 @@ export async function callStructured<T>({
 
         const text = response.text;
         if (!text) {
-          outcome("empty");
+          // A refusal and a sulk both arrive as no text, and telling them apart
+          // matters most for the one call whose input someone else chose. The
+          // two live in different places: an *input* blocked before generation
+          // produces no candidates at all, so `finishReason` never sees it and
+          // only `promptFeedback` says why. Traced, not branched on — the
+          // contract is still that unusable output returns null.
+          const blocked = response.promptFeedback?.blockReason;
+          outcome(blocked ? `blocked:${blocked}` : finish === "STOP" ? "empty" : "cut-off");
           return null;
         }
         const parsed = schema.safeParse(JSON.parse(stripFence(text)));

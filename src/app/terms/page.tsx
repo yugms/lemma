@@ -87,9 +87,9 @@ export default function TermsPage() {
                 "Answers are released only for problems in sets you own, and only once an attempt is on record. Working around that is a breach of these terms, and it mostly cheats you rather than anyone else.",
             },
             {
-              term: "Upload other people's material",
+              term: "Upload material you have no right to",
               detail:
-                "Only photograph work you are entitled to upload. Do not upload anything containing another person's details, or anything unlawful.",
+                "Upload only work you own or are permitted to use. A textbook chapter, a paid worksheet or a past paper is somebody's copyright, and uploading it to generate practice from is your call to answer for, not lemma's. Do not upload anything carrying another person's details, and nothing unlawful.",
             },
             {
               term: "Use it to generate anything other than maths practice",
@@ -116,6 +116,10 @@ export default function TermsPage() {
             {
               term: "Worksheet scans",
               detail: `${DAILY_LIMITS.scans.guest} a day as a guest, ${DAILY_LIMITS.scans.member} signed in.`,
+            },
+            {
+              term: "Study material read",
+              detail: `${DAILY_LIMITS.materials.guest} a day as a guest, ${DAILY_LIMITS.materials.member} signed in. Reading a piece of material and generating from it are separate costs, so a set built from your own material also counts against generated sets.`,
             },
             {
               term: "Review sets and copies of shared sets",

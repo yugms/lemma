@@ -53,6 +53,11 @@ export default function PrivacyPage() {
                 "The image files themselves, along with what the model read from them and the marks it gave. Covered in its own section below, because it is the most sensitive thing here.",
             },
             {
+              term: "Study material you upload",
+              detail:
+                "Not the file. A worksheet, PDF or pasted text you upload to generate practice from is read once and then deleted — what is kept is the description worked out from it: what topics it covers, how hard it is, and what kinds of task are in it, plus any note you typed about what you wanted. Covered in its own section below.",
+            },
+            {
               term: "Ordinary server logs",
               detail:
                 "The hosting provider records requests, including IP addresses, as part of running the service. These are not linked to your practice record and are not used to build any profile of you.",
@@ -92,21 +97,53 @@ export default function PrivacyPage() {
           records, in that order, deliberately: doing it the other way round would
           leave files behind that nothing points at any more.
         </p>
+        <p>
+          Uploading study material works differently, and the difference is deliberate
+          — see the next section.
+        </p>
+      </Section>
+
+      <Section id="materials" heading="Study material you upload">
+        <p>
+          Generating practice from your own material uploads a file too, and the same
+          warning applies about what a photographed page carries beyond the maths. What
+          is different is what survives.
+        </p>
+        <p>
+          The file goes into a private storage bucket filed under your account id, is
+          sent once to Google&apos;s Gemini model to be described, and is then{" "}
+          <em>deleted</em> — including when the reading fails, and whether or not you go
+          on to generate anything. Nothing in lemma keeps your worksheet, your chapter
+          or your notes.
+        </p>
+        <p>
+          What is kept is what came back: a short title and summary, which topics it
+          covers, roughly how hard it is, the kinds of task in it, and the note you
+          typed about what you wanted next. That description is what problems are
+          written from, which is why more sets can be built from the same material
+          without uploading it again. Deleting all your data removes it.
+        </p>
+        <p>
+          Problems written from your material are marked so that they are never served
+          to anyone else, unlike problems from an ordinary build, which go into a shared
+          pool.
+        </p>
       </Section>
 
       <Section id="ai" heading="What is sent to Google">
         <p>
-          lemma uses Google&apos;s Gemini models through Google AI Studio for four
+          lemma uses Google&apos;s Gemini models through Google AI Studio for five
           things: writing problems, independently re-solving them to check the answer,
-          judging whether an answer you typed means the same as the stored one, and
-          reading photographed worksheets.
+          judging whether an answer you typed means the same as the stored one, reading
+          photographed worksheets, and reading study material you upload.
         </p>
         <p>
           That means the following leaves lemma and reaches Google: the topic and
           settings you asked for, the text of problems, answers you submit when local
-          comparison cannot settle them, and any worksheet image you upload. Your name,
-          your email address and your account id are <em>not</em> sent — the model is
-          given the maths, not the student.
+          comparison cannot settle them, any worksheet image you upload, and any study
+          material you upload along with the note you typed about it. Your name, your
+          email address and your account id are <em>not</em> sent — the model is given
+          the maths, not the student.
         </p>
         <p>
           Google&apos;s handling of that data is governed by its own terms, not by this
@@ -190,7 +227,8 @@ export default function PrivacyPage() {
             },
             {
               term: "Delete all my data",
-              detail: "The above, plus the sets. The account itself survives.",
+              detail:
+                "The above, plus the sets and everything worked out from study material you uploaded. The account itself survives.",
             },
             {
               term: "Delete my account",

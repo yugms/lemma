@@ -29,6 +29,17 @@ export const DAILY_LIMITS = {
   /** Worksheet scans. Each one is a multi-image vision call — the priciest thing here. */
   scans: { guest: 5, member: 20 },
   /**
+   * Study materials analysed. One multimodal call over up to four files, so the
+   * spend is the same order as a scan — but this is also the only place a
+   * student's own free text is interpreted, which makes the cap the thing that
+   * decides how fast someone can iterate on a prompt-injection attempt. Set low
+   * for that reason as much as for the money.
+   *
+   * Analysing a material and then building from it are separate spends: a set
+   * built this way also counts against `generatedSets`.
+   */
+  materials: { guest: 3, member: 10 },
+  /**
    * Model calls made while grading: the misconception diagnosis on a wrong
    * answer, and the equivalence check on an answer local comparison can't
    * settle.
@@ -77,6 +88,10 @@ export const IP_LIMITS = {
   scans: {
     burst: { seconds: 10 * 60, max: 30 },
     day: { seconds: 24 * 3600, max: 100 },
+  },
+  materials: {
+    burst: { seconds: 10 * 60, max: 20 },
+    day: { seconds: 24 * 3600, max: 60 },
   },
 } as const;
 
@@ -136,6 +151,38 @@ export async function scanAllowance(
     message: isAnonymous
       ? `Daily limit reached for guests (${cap} scans). Sign in with Google for a higher limit.`
       : `Daily limit reached (${cap} scans). Try again tomorrow.`,
+  };
+}
+
+/**
+ * Whether a study material may be analysed.
+ *
+ * Counts every row for the same reason `scanAllowance` does: a material that
+ * came back `not_math` still spent the call that decided so, and charging only
+ * for the usable ones would make an unusable upload the cheapest way to spend
+ * somebody else's quota — which, for the one endpoint that reads a file chosen
+ * by whoever is asking, is the wrong incentive to hand out.
+ */
+export async function materialAllowance(
+  userId: string,
+  isAnonymous: boolean
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const db = createServiceClient();
+  const { count, error } = await db
+    .from("study_materials")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gte("created_at", startOfToday().toISOString());
+
+  if (error) return { ok: false, message: CAP_CHECK_FAILED };
+
+  const cap = capFor("materials", isAnonymous);
+  if ((count ?? 0) < cap) return { ok: true };
+  return {
+    ok: false,
+    message: isAnonymous
+      ? `Daily limit reached for guests (${cap} uploads). Sign in with Google for a higher limit.`
+      : `Daily limit reached (${cap} uploads). Try again tomorrow.`,
   };
 }
 

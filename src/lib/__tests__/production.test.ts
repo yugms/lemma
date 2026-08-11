@@ -421,6 +421,7 @@ describe("account summary counts", () => {
     attempts: null,
     sessions: null,
     scans: null,
+    materials: null,
     hasCoachRead: false,
   };
 
@@ -431,11 +432,19 @@ describe("account summary counts", () => {
     // nothing to remove when there may well be.
     expect(isEmpty(unknown.attempts)).toBe(false);
     expect(isEmpty(unknown.sets)).toBe(false);
+    expect(isEmpty(unknown.materials)).toBe(false);
     expect(isEmpty(0)).toBe(true);
   });
 
   it("distinguishes unknown from zero at the type level", () => {
-    const empty: AccountSummary = { ...unknown, sets: 0, attempts: 0, sessions: 0, scans: 0 };
+    const empty: AccountSummary = {
+      ...unknown,
+      sets: 0,
+      attempts: 0,
+      sessions: 0,
+      scans: 0,
+      materials: 0,
+    };
     expect(empty.sets).toBe(0);
     expect(unknown.sets).toBeNull();
     // A renderer showing `value ?? "—"` must produce a dash, not a zero.
