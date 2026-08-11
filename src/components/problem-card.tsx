@@ -8,6 +8,7 @@ import { MultiSelectInput } from "@/components/problem-inputs/multi-select";
 import { CorrectOrder, OrderingInput } from "@/components/problem-inputs/ordering";
 import { MatchingInput } from "@/components/problem-inputs/matching";
 import { MultiPartInput } from "@/components/problem-inputs/multi-part";
+import { MATH_INPUT_PROPS } from "@/components/problem-inputs/math-input-props";
 import { GraphPointsInput, type Point } from "@/components/problem-inputs/graph-points";
 import {
   curveFromHandles,
@@ -294,11 +295,15 @@ export function ProblemCard({
     setError(null);
   }
 
-  function trySubmitFromKey(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && submittable && !inert && !busy) {
-      e.preventDefault();
-      submit(retrying ? "retry" : "answer");
-    }
+  /**
+   * Implicit form submission replaces the old per-input Enter handler: the
+   * browser already does this, and doing it ourselves meant the return key
+   * still announced itself as a newline. Every other control inside the form
+   * declares `type="button"`, so nothing else can fire this.
+   */
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (submittable && !inert && !busy) submit(retrying ? "retry" : "answer");
   }
 
   const choices = problem.choices ?? [];
@@ -366,6 +371,7 @@ export function ProblemCard({
 
       {/* ── Answer input ──────────────────────────────────────────── */}
 
+      <form onSubmit={onSubmit}>
       {problem.format === "mcq" && (
         <div
           role="radiogroup"
@@ -394,7 +400,10 @@ export function ProblemCard({
                   isWrongPick && "border-bad bg-bad-wash",
                   !marked && isPicked && "border-accent bg-accent-wash",
                   !marked && !isPicked && "border-line hover:border-accent-line hover:bg-surface",
-                  marked && !isCorrectChoice && !isWrongPick && "border-line opacity-45"
+                  // Not 45: dimmed that far, an unchosen option is below
+                  // readable contrast on a phone screen in daylight, and these
+                  // are the options the choice notes below go on to explain.
+                  marked && !isCorrectChoice && !isWrongPick && "border-line opacity-60"
                 )}
               >
                 <span
@@ -426,10 +435,10 @@ export function ProblemCard({
         <div className="mt-8">
           <div className="relative">
             <input
+              {...MATH_INPUT_PROPS}
               value={openAnswer}
               disabled={inert || busy}
               onChange={(e) => setOpenAnswer(e.target.value)}
-              onKeyDown={trySubmitFromKey}
               placeholder="x = 3"
               aria-label="Your answer"
               className="field pr-11 font-mono"
@@ -448,19 +457,22 @@ export function ProblemCard({
       )}
 
       {problem.format === "fill_blank" && (
-        <div className="mt-8 flex flex-wrap gap-4">
+        // A grid rather than a wrapping row of fixed 144px fields: at 350px
+        // three blanks laid out 2 + 1 ragged, and the `text-sm` that made them
+        // fit is exactly what triggers the iOS focus zoom.
+        <div className="mt-8 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap">
           {Array.from({ length: problem.blanks_count ?? 1 }, (_, i) => i + 1).map((n) => (
-            <label key={n} className="flex items-center gap-2.5">
+            <label key={n} className="flex min-w-0 items-center gap-2.5">
               <span className="mono-meta">{n}</span>
               <input
+                {...MATH_INPUT_PROPS}
                 value={blankAnswers[String(n)] ?? ""}
                 disabled={inert || busy}
                 onChange={(e) =>
                   setBlankAnswers((prev) => ({ ...prev, [String(n)]: e.target.value }))
                 }
-                onKeyDown={trySubmitFromKey}
                 aria-label={`Blank ${n}`}
-                className="field w-36 py-2 font-mono text-sm"
+                className="field w-full py-2 font-mono sm:w-36 sm:text-sm"
               />
             </label>
           ))}
@@ -546,10 +558,10 @@ export function ProblemCard({
               />
               <div className="relative mt-4">
                 <input
+                  {...MATH_INPUT_PROPS}
                   value={openAnswer}
                   disabled={inert || busy}
                   onChange={(e) => setOpenAnswer(e.target.value)}
-                  onKeyDown={trySubmitFromKey}
                   placeholder="y = 2x + 1"
                   aria-label="Your answer"
                   className="field pr-11 font-mono"
@@ -572,7 +584,6 @@ export function ProblemCard({
           values={partAnswers}
           disabled={inert || busy}
           answers={key?.part_answers}
-          onSubmitKey={trySubmitFromKey}
           onChange={(label, value) =>
             setPartAnswers((prev) => ({ ...prev, [label]: value }))
           }
@@ -611,11 +622,16 @@ export function ProblemCard({
       {/* ── Actions ───────────────────────────────────────────────── */}
 
       {!inert && (
-        <div className="mt-8 flex flex-wrap items-center gap-3">
+        // Sticky on a touch screen, where the statement, the input and the
+        // hint together are taller than the visual viewport once the keyboard
+        // is up, and this was the thing pushed off the bottom. It sticks only
+        // while the card is on screen, so it never stacks with the engine's
+        // own Previous/Next row — and the routes that render this card are the
+        // ones where MobileTabBar stands down, so there is only ever one bar.
+        <div className="mt-8 flex flex-wrap items-center gap-3 pointer-coarse:sticky pointer-coarse:bottom-0 pointer-coarse:z-10 pointer-coarse:-mx-6 pointer-coarse:border-t pointer-coarse:border-line pointer-coarse:bg-surface pointer-coarse:px-6 pointer-coarse:py-3.5 sm:pointer-coarse:mx-0 sm:pointer-coarse:px-0">
           <button
-            type="button"
+            type="submit"
             disabled={!submittable || busy}
-            onClick={() => submit(retrying ? "retry" : "answer")}
             className="btn btn-accent"
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
@@ -644,6 +660,7 @@ export function ProblemCard({
           )}
         </div>
       )}
+      </form>
 
       {quiet && answered && (
         <p role="status" className="mono-meta mt-8 flex items-center gap-2">

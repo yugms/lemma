@@ -55,7 +55,16 @@ export function OrderingInput({
   return (
     <div className="mt-8">
       <p className="mono-meta mb-3">
-        Put the steps in order{!disabled && " — use the arrows, or Alt + ↑ ↓"}
+        {/* The keyboard route is named only where there is a keyboard to name
+            it to — on a phone "Alt + ↑ ↓" is instructions for a machine the
+            reader isn't holding. */}
+        Put the steps in order
+        {!disabled && (
+          <>
+            {" — use the arrows"}
+            <span className="pointer-coarse:hidden">, or Alt + ↑ ↓</span>
+          </>
+        )}
       </p>
       <p aria-live="polite" className="sr-only">
         {announcement}
@@ -104,14 +113,21 @@ export function OrderingInput({
                   {rightHere ? "In place" : "Out of place"}
                 </span>
               ) : (
-                <span className="flex shrink-0 flex-col">
+                /* Stacked they were two 20px targets touching each other,
+                   which is the one arrangement where a bigger hit area makes
+                   things worse — two 44px areas 20px apart overlap by more
+                   than half, so a tap on "up" is as likely to be "down", and
+                   getting it wrong moves the step the way you didn't want.
+                   Side by side on touch, at 40px: under the guideline by
+                   design, because unambiguous beats large. */
+                <span className="flex shrink-0 flex-col pointer-coarse:flex-row pointer-coarse:gap-1.5">
                   <button
                     type="button"
                     disabled={disabled || i === 0}
                     onClick={() => move(i, -1)}
                     onKeyDown={(e) => onKeyDown(e, i)}
                     aria-label={`Move step ${i + 1} of ${order.length} up`}
-                    className="rounded-[2px] p-0.5 text-faint transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-faint"
+                    className="grid place-items-center rounded-[2px] p-0.5 text-faint transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-faint pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:border pointer-coarse:border-line"
                   >
                     <ChevronUp className="h-4 w-4" aria-hidden />
                   </button>
@@ -121,7 +137,7 @@ export function OrderingInput({
                     onClick={() => move(i, 1)}
                     onKeyDown={(e) => onKeyDown(e, i)}
                     aria-label={`Move step ${i + 1} of ${order.length} down`}
-                    className="rounded-[2px] p-0.5 text-faint transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-faint"
+                    className="grid place-items-center rounded-[2px] p-0.5 text-faint transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-faint pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:border pointer-coarse:border-line"
                   >
                     <ChevronDown className="h-4 w-4" aria-hidden />
                   </button>

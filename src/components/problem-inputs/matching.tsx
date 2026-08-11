@@ -64,9 +64,13 @@ export function MatchingInput({
                 <label className="sr-only" htmlFor={`match-${l.id}`}>
                   Match for {l.id}
                 </label>
+                {/* Full width on its own line below the prompt at phone
+                    widths: at 302px a 112px `shrink-0` select forced the
+                    prompt to wrap around it and made every row three lines
+                    tall. */}
                 <select
                   id={`match-${l.id}`}
-                  className="field w-28 shrink-0"
+                  className="field w-full sm:w-28 sm:shrink-0"
                   value={picked}
                   disabled={disabled}
                   onChange={(e) => onChange(l.id, e.target.value)}
