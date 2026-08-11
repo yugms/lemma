@@ -36,12 +36,19 @@ export function AccuracyMeter({
   );
 }
 
-/** One breakdown — by format, by style, by difficulty. */
-export function SliceList({ title, slices }: { title: string; slices: SliceStat[] }) {
+/**
+ * One breakdown — by format, by style, by difficulty.
+ *
+ * The heading is optional because one caller sits directly under a section
+ * heading that already names it, and passing `""` used to render a genuinely
+ * empty `<h3>` — an element with no accessible name, which is a WCAG failure
+ * rather than a cosmetic one.
+ */
+export function SliceList({ title, slices }: { title?: string; slices: SliceStat[] }) {
   if (slices.length === 0) return null;
   return (
     <div>
-      <h3 className="eyebrow border-b border-line pb-2.5">{title}</h3>
+      {title ? <h3 className="eyebrow border-b border-line pb-2.5">{title}</h3> : null}
       <ul className="mt-4 space-y-4">
         {slices.map((s) => (
           <li key={s.key}>

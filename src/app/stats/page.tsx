@@ -17,7 +17,11 @@ import { PrescriptionCard } from "@/components/stats/prescription-card";
 import { AccuracyMeter, ActivityStrip, SliceList } from "@/components/stats/meters";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Stats" };
+export const metadata: Metadata = {
+  title: "Stats",
+  description:
+    "Accuracy by topic, format, style and difficulty, the mistakes that keep recurring, and one-click sets aimed at your weakest work.",
+};
 
 export default async function StatsPage({
   searchParams,
@@ -230,15 +234,22 @@ export default async function StatsPage({
             <section>
               <h2 className="eyebrow border-b border-line pb-3">How you practised</h2>
               <div className="mt-6">
-                <SliceList title="" slices={snapshot.byMode} />
+                {/* No title: the section heading above already names it. */}
+                <SliceList slices={snapshot.byMode} />
               </div>
             </section>
           )}
 
-          <section className="grid gap-10 sm:grid-cols-3">
-            <SliceList title="By format" slices={snapshot.byFormat} />
-            <SliceList title="By style" slices={snapshot.byStyle} />
-            <SliceList title="By difficulty" slices={snapshot.byDifficulty} />
+          {/* The h2 is load-bearing, not decoration: without it the three h3s
+              below hang directly off the page h1, which is the one heading jump
+              on this page. Every other section here is an h2. */}
+          <section>
+            <h2 className="eyebrow border-b border-line pb-3">Where the marks go</h2>
+            <div className="mt-6 grid gap-10 sm:grid-cols-3">
+              <SliceList title="By format" slices={snapshot.byFormat} />
+              <SliceList title="By style" slices={snapshot.byStyle} />
+              <SliceList title="By difficulty" slices={snapshot.byDifficulty} />
+            </div>
           </section>
 
           <section>

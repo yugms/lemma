@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { ArrowLeft, ArrowRight, Flag, Loader2, Timer } from "lucide-react";
 import { ProblemCard } from "@/components/problem-card";
+import { EmptySet } from "@/components/practice/empty-set";
 import { formatDuration } from "@/lib/format";
 import type { PreparedProblem } from "@/lib/ai/schemas";
 
@@ -110,7 +111,9 @@ export function QuizEngine({
 
   const allAnswered = done === problems.length;
 
-  if (!problem) return null;
+  // See the same guard in `practice-engine.tsx`: a set with no problems used to
+  // render an empty page with no heading.
+  if (!problem) return <EmptySet setId={set.id} />;
 
   return (
     <div className="mx-auto max-w-2xl">

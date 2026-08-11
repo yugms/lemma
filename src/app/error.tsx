@@ -12,7 +12,11 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error(error);
+    // Development only. In production this dumped the whole Error into a
+    // visitor's console on any route failure, which tells them nothing they can
+    // act on — the `digest` shown below is the part worth reporting, and it is
+    // on the page. There is no error-reporting service to send it to instead.
+    if (process.env.NODE_ENV !== "production") console.error(error);
   }, [error]);
 
   return (
