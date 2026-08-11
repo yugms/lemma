@@ -202,7 +202,15 @@ export async function solveCaptcha(): Promise<string | null> {
             );
             return;
           }
-          console.warn(`[lemma] Turnstile error ${code ?? "(no code)"}; letting the widget retry.`);
+          // Development only: a recoverable Turnstile error is expected noise
+          // (one dropped packet on a phone produces one), and the widget is
+          // already retrying. Shipping it just puts a warning in a student's
+          // console for something that is about to fix itself.
+          if (process.env.NODE_ENV !== "production") {
+            console.warn(
+              `[lemma] Turnstile error ${code ?? "(no code)"}; letting the widget retry.`
+            );
+          }
         },
         "timeout-callback": () => fail("The anti-abuse check timed out."),
         // Only dim the page once there is actually something to interact with.

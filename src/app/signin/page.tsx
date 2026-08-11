@@ -6,7 +6,11 @@ import { describeSignInError } from "@/lib/auth-errors";
 import { SignInPanel } from "@/components/sign-in-panel";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Sign in" };
+export const metadata: Metadata = {
+  title: "Sign in",
+  description:
+    "Sign in with Google to keep your practice history across devices. Work you did as a guest comes with you.",
+};
 
 /** Same guard the callback applies — a `next` off this origin is dropped. */
 function safeNext(next: string | undefined): string {

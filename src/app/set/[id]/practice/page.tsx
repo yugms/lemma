@@ -8,7 +8,10 @@ import { PracticeEngine } from "@/components/practice/practice-engine";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = { title: "Practice" };
+export const metadata: Metadata = {
+  title: "Practice",
+  description: "Graded as you go, with one retry on a wrong answer and a worked solution whenever you want it.",
+};
 
 /**
  * The set, its problems and any progress are all resolved here rather than

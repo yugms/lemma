@@ -35,7 +35,28 @@ export type SetConfig = {
    * plan id and rebuild this itself.
    */
   focus?: { label: string; directives: string[] };
+  /**
+   * A set modelled on material this student uploaded. Rebuilt server-side from
+   * the stored digest — the same rule as `focus` and for the same reason:
+   * `concepts` and `archetypes` reach the authoring prompt verbatim, so a
+   * client may name a material id and adjust closed vocabularies (which
+   * topics, what level, which styles and formats) and nothing else.
+   *
+   * Kept beside `focus` rather than folded into `focus.directives` because the
+   * fence around each block claims something different about where its text
+   * came from — see `buildUserMessage`.
+   */
+  material?: { id: string; concepts: string[]; archetypes: string[]; emphasis: string[] };
 };
+
+/**
+ * A set written for one student, from something only they have.
+ *
+ * Pool problems were authored for whoever asked first and templates cannot be
+ * aimed at anything, so neither belongs in a set sold as built for you. Both
+ * entry points want that rule, so it is named once rather than tested twice.
+ */
+const bespoke = (config: SetConfig) => Boolean(config.focus || config.material);
 
 export type BuildEvent =
   | { type: "status"; message: string }
@@ -47,6 +68,22 @@ const POOL_FRACTION = 0.5;
 const MAX_COUNT = 15;
 /** Headroom under the route's 300s `maxDuration`, counted from the request. */
 export const BUILD_BUDGET_MS = 230_000;
+
+/**
+ * Whether a problem may be served to somebody else.
+ *
+ * `active` is the pool. `unlisted` is a problem that exists only for the set it
+ * was written for — today that means anything authored from one student's
+ * uploaded material, which nobody else should be handed. The pool query filters
+ * on this, and `problems_pick` is a partial index over `status = 'active'`, so
+ * the exclusion costs nothing.
+ *
+ * `problems_status_check` in the DB pins the same two values, so adding one here
+ * needs a migration too. That is deliberate: because the index is partial, an
+ * unrecognised status doesn't fail anywhere — the row just stops being picked,
+ * silently and forever.
+ */
+export type ProblemStatus = "active" | "unlisted";
 
 type NewProblemRow = {
   topic_id: string;
@@ -60,10 +97,42 @@ type NewProblemRow = {
   template_id: string | null;
   content_hash: string;
   verification: unknown;
+  /**
+   * On every row, never conditionally: supabase-js sends an array insert as one
+   * statement with a shared column list, so a key present on some rows only
+   * becomes NULL on the rest, and this column is NOT NULL.
+   */
+  status: ProblemStatus;
 };
 
 function hashOf(input: string): string {
   return createHash("sha256").update(input).digest("hex");
+}
+
+/**
+ * The dedup key for a problem, namespaced when it came from uploaded material.
+ *
+ * `insertProblems` upserts on `(topic_id, content_hash)`, which PostgREST
+ * compiles to `ON CONFLICT DO UPDATE SET` every column in the payload — so a
+ * collision does not merely skip, it overwrites. `status` is the first column
+ * where two rows sharing a hash legitimately disagree, and without a separate
+ * namespace the overwrite runs both ways: a material build lands on a statement
+ * already in the pool and demotes that shared, verified problem to `unlisted`
+ * for everyone; a later ordinary build lands on a material problem and promotes
+ * it to `active`, putting something written from one student's homework in
+ * front of strangers. Both are silent, and no query the app makes would show
+ * either.
+ *
+ * Namespacing means the only row a material problem can collide with is another
+ * problem from the same material, which is the right dedup unit anyway.
+ */
+export function contentHashFor(
+  p: GeneratedProblem,
+  templateId: string | null,
+  materialId?: string
+): string {
+  const base = templateId ?? problemHashInput(p);
+  return hashOf(materialId ? `material:${materialId}::${base}` : base);
 }
 
 export type VerifiedProblem = { problem: TaggedProblem; verification: unknown };
@@ -128,12 +197,13 @@ async function runChecks(
   };
 }
 
-function rowFromGenerated(
+export function rowFromGenerated(
   p: GeneratedProblem,
   topicId: string,
   source: "template" | "ai",
   templateId: string | null,
-  verification: unknown
+  verification: unknown,
+  materialId?: string
 ): NewProblemRow {
   const { content, answer, explanation } = splitProblem(p);
   return {
@@ -146,8 +216,9 @@ function rowFromGenerated(
     explanation,
     source,
     template_id: templateId,
-    content_hash: hashOf(templateId ?? problemHashInput(p)),
+    content_hash: contentHashFor(p, templateId, materialId),
     verification,
+    status: materialId ? "unlisted" : "active",
   };
 }
 
@@ -237,7 +308,7 @@ export async function* buildProblemSet(
   let lastMark = Date.now();
   const mark = (phase: string, extra = "") => {
     const now = Date.now();
-    console.info(`[lemma:build] phase=${phase} ms=${now - lastMark}${extra && ` ${extra}`}`);
+    console.info(`[lemma/build] phase=${phase} ms=${now - lastMark}${extra && ` ${extra}`}`);
     lastMark = now;
   };
 
@@ -253,8 +324,8 @@ export async function* buildProblemSet(
 
   // Pool problems are generic by construction — they were authored for whoever
   // asked first. A set advertised as designed for you has to be written for you,
-  // so a targeted build skips reuse and pays the AI cost for every slot.
-  const poolTarget = config.focus ? 0 : Math.floor(count * POOL_FRACTION);
+  // so a bespoke build skips reuse and pays the AI cost for every slot.
+  const poolTarget = bespoke(config) ? 0 : Math.floor(count * POOL_FRACTION);
   if (poolTarget > 0) {
     const { data: pool } = await db
       .from("problems")
@@ -282,11 +353,12 @@ export async function* buildProblemSet(
   }
   mark("pool", `reused=${chosen.length}`);
 
-  // A targeted set aims at the problems this student got wrong, which is exactly
-  // where the author is most likely to land on something they have already seen.
-  // Their recent statements go in as negative examples.
+  // A bespoke set aims at a narrow target — the problems this student got wrong,
+  // or the shape of the page they uploaded — which is exactly where the author
+  // is most likely to land on something they have already seen. Their recent
+  // statements go in as negative examples.
   let seenStatements: string[] = [];
-  if (config.focus && seenIds.size > 0) {
+  if (bespoke(config) && seenIds.size > 0) {
     const { data: seenRows } = await db
       .from("problems")
       .select("content")
@@ -297,9 +369,10 @@ export async function* buildProblemSet(
   }
 
   // --- 2. templates ---
-  // Templates are deterministic drills; they can't be aimed at a misconception,
-  // so a targeted set skips them for the same reason it skips the pool.
-  const templateSlots = config.focus ? 0 : count - chosen.length;
+  // Templates are deterministic drills; they can't be aimed at a misconception
+  // or at somebody's worksheet, so a bespoke set skips them for the same reason
+  // it skips the pool.
+  const templateSlots = bespoke(config) ? 0 : count - chosen.length;
   if (templateSlots > 0) {
     const eligible = topics.flatMap((t) =>
       templatesFor(t.slug, config.difficulty, config.styles, config.formats).map((e) => ({
@@ -375,6 +448,7 @@ export async function* buildProblemSet(
             formats: config.formats,
             avoid: [...chosen.map((c) => c.statement), ...seenStatements].filter(Boolean),
             focus: config.focus?.directives,
+            material: config.material,
           },
           {
             pool,
@@ -449,7 +523,8 @@ export async function* buildProblemSet(
           topicInfos[v.problem.topic_index].id,
           "ai",
           null,
-          v.verification
+          v.verification,
+          config.material?.id
         )
       );
     const inserted = await insertProblems(db, rows);
@@ -511,7 +586,7 @@ export async function* buildProblemSet(
   // same 300s invocation.
   mark("save");
   console.info(
-    `[lemma:build] done ms=${Date.now() - requestStartedAt} delivered=${chosen.length} asked=${count}`
+    `[lemma/build] done ms=${Date.now() - requestStartedAt} delivered=${chosen.length} asked=${count}`
   );
 
   yield { type: "complete", setId: set.id };
@@ -522,9 +597,16 @@ async function insertProblems(
   rows: NewProblemRow[]
 ): Promise<{ id: string; statement: string }[]> {
   if (rows.length === 0) return [];
+  // Postgres refuses an `ON CONFLICT DO UPDATE` that would touch one row twice,
+  // and it refuses the whole statement rather than the offending row. Two
+  // authored problems can reach this with the same hash: `statementKey` already
+  // dedups in `generateProblems`, but it compares whitespace and case where
+  // `problemHashInput` compares the rendered problem, so they do not agree in
+  // every case.
+  const unique = [...new Map(rows.map((r) => [`${r.topic_id}|${r.content_hash}`, r])).values()];
   const { data, error } = await db
     .from("problems")
-    .upsert(rows, { onConflict: "topic_id,content_hash" })
+    .upsert(unique, { onConflict: "topic_id,content_hash" })
     .select("id, content");
   if (error) throw new Error(`insert problems failed: ${error.message}`);
   return (data ?? []).map((r) => ({

@@ -8,6 +8,7 @@ import { cachedCoachRead } from "@/lib/ai/coach";
 import { loadLatestSession } from "@/lib/study-session";
 import { prescribe, PLAN_IDS } from "@/lib/coach-plan";
 import { ipAllowance } from "@/lib/limits";
+import { getMaterial } from "@/lib/materials";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -35,7 +36,32 @@ const TargetedSchema = z.object({
   scope: z.enum(["all", "session"]).default("all"),
 });
 
-const BodySchema = z.union([TargetedSchema, ManualSchema]);
+/**
+ * A set modelled on material the caller uploaded.
+ *
+ * The same boundary as the targeted branch, drawn one notch differently. The
+ * rule above is not "the client writes nothing" — `ManualSchema` has always
+ * accepted client-chosen topics, level, styles and formats. The rule is that a
+ * client may write *closed vocabularies* and never prose, because prose is what
+ * reaches the model. So the review step sends back the same four fields it was
+ * shown, and `concepts`, `archetypes` and `emphasis` are read here from the
+ * stored digest, never from the body. `topicIds` is checked against that
+ * digest's own rather than against the catalog, so a material cannot be aimed
+ * at a subject it says nothing about.
+ */
+const MaterialSchema = z.object({
+  mode: z.literal("material"),
+  materialId: z.string().uuid(),
+  topicIds: z.array(z.string().uuid()).min(1).max(6),
+  count: z.number().int().min(1).max(15),
+  difficulty: z.number().int().min(1).max(5),
+  styles: z.array(z.enum(PROBLEM_STYLES)).min(1),
+  formats: z.array(z.enum(PROBLEM_FORMATS)).min(1),
+});
+
+// `ManualSchema` stays last: its `mode` is optional, so it matches anything the
+// other two would have matched and would swallow them.
+const BodySchema = z.union([TargetedSchema, MaterialSchema, ManualSchema]);
 
 export async function POST(request: NextRequest) {
   // The generation budget is measured from here, not from where generation
@@ -91,6 +117,38 @@ export async function POST(request: NextRequest) {
       );
     }
     config = chosen.config;
+  } else if (body.mode === "material") {
+    // Scoped to the caller, so a forged id matches nothing. No model call here:
+    // the digest was written when the material was analysed, which is what
+    // keeps this branch off the generation budget — same reasoning as
+    // `cachedCoachRead` above.
+    const material = await getMaterial(user.id, body.materialId);
+    if (!material || material.status !== "ready" || !material.digest) {
+      return Response.json({ error: "That upload isn't ready to build from." }, { status: 404 });
+    }
+    const digest = material.digest;
+    const allowed = new Set(digest.topic_ids);
+    const topicIds = body.topicIds.filter((id) => allowed.has(id));
+    if (topicIds.length === 0) {
+      return Response.json(
+        { error: "Pick at least one of the topics found in your material." },
+        { status: 400 }
+      );
+    }
+    config = {
+      topicIds,
+      count: body.count,
+      difficulty: body.difficulty,
+      styles: body.styles,
+      formats: body.formats,
+      title: digest.title ? `${digest.title} — from your material` : undefined,
+      material: {
+        id: material.id,
+        concepts: digest.concepts,
+        archetypes: digest.archetypes,
+        emphasis: digest.requested_emphasis,
+      },
+    };
   } else {
     // `mode` is routing, not configuration — keep it out of the stored jsonb.
     config = {

@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { ArrowRight, BarChart3, Check, Plus, ShieldCheck } from "lucide-react";
+import { JsonLd, appGraph } from "@/components/json-ld";
+import { siteUrl } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth-server";
 import { loadCatalog } from "@/lib/catalog";
@@ -9,6 +12,10 @@ import { BuilderForm } from "@/components/builder/builder-form";
 import { Stat, StatGrid } from "@/components/stat-grid";
 
 export const dynamic = "force-dynamic";
+
+/** Matches the hero copy below, so the markup describes what is on the page. */
+const APP_DESCRIPTION =
+  "Original math problem sets built to order by course, topic, difficulty and style. Every problem is solved independently and checked before it reaches you, and comes with a worked solution.";
 
 const STEPS = [
   {
@@ -216,6 +223,9 @@ export default async function Home() {
 
   return (
     <div>
+      {/* On this branch only: it is the one a crawler ever sees, since nothing
+          indexing the site arrives with a session. */}
+      <JsonLd data={appGraph(siteUrl(), APP_DESCRIPTION)} nonce={(await headers()).get("x-nonce")} />
       <section className="pb-4">
         <p className="eyebrow eyebrow-accent">Math practice</p>
         <h1 className="display mt-6 max-w-3xl text-hero">Problem sets built to order.</h1>

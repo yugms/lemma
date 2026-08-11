@@ -6,7 +6,11 @@ import { loadAccountSummary } from "@/lib/account";
 import { DangerZone } from "@/components/account/danger-zone";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Account" };
+export const metadata: Metadata = {
+  title: "Account",
+  description:
+    "What's stored against your account, and the controls to clear your practice history, delete your data, or delete the account outright.",
+};
 
 /**
  * The honest answer for a visitor with no session: there is genuinely nothing

@@ -65,11 +65,12 @@ export function GraphPointsInput({
       </p>
 
       <div className="relative overflow-hidden rounded-[3px] border border-line bg-surface">
-        <div
-          aria-hidden
-          className="[&>svg]:block"
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
+        {/* Not `aria-hidden`. The server-rendered plot carries its own
+            `role="img"` and a description of the curve and axes — the stimulus
+            — while the overlay below names the controls. They describe
+            different things, so hiding this one left a screen-reader user able
+            to pick points on a graph nobody had described to them. */}
+        <div className="[&>svg]:block" dangerouslySetInnerHTML={{ __html: svg }} />
 
         <svg
           viewBox={`0 0 ${PLOT_W} ${PLOT_H}`}

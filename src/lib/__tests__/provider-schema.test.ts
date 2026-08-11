@@ -8,6 +8,7 @@ import {
   FeedbackResultSchema,
   EquivalenceResultSchema,
   CoachReadSchema,
+  MaterialDigestSchema,
 } from "../ai/schemas";
 
 /**
@@ -25,6 +26,7 @@ describe("model JSON schemas", () => {
     ["feedback", FeedbackResultSchema] as const,
     ["equivalence", EquivalenceResultSchema] as const,
     ["coach", CoachReadSchema] as const,
+    ["material", MaterialDigestSchema] as const,
   ];
 
   it("are inlined, self-contained, and carry no $schema", () => {

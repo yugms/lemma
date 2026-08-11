@@ -33,6 +33,7 @@ It runs on Google AI Studio's free tier, so the whole thing costs $0 to operate.
 - **Graphs you interact with, three ways** — read a value off a plot, click the lattice points that satisfy a condition, or drag handles to produce a curve. One DB format, three tasks. Plots render to SVG in Node, so no charting library reaches the browser.
 - **Four ways to work a set** — practice (graded, one retry, solutions on demand), quiz (nothing disclosed until you hand it in), flashcards (unscored, infinitely repeatable), and paper.
 - **Print it, do it on paper, scan it back** — print a worksheet with optional answer key, work it by hand, then photograph it. A vision model transcribes and marks it into the same record as typed practice, behind a confidence gate so a misread never becomes permanent history.
+- **Start from your own material** — paste your notes or upload photos or a PDF of a worksheet or chapter. It is read once into a structured digest — topics, level, and the kinds of task in it — and the file is then deleted; fresh problems are written in the same shape, at that level or a step either side. An optional note ("more of these but harder") steers it. Problems written this way are never served to anyone else.
 - **Grading that understands math** — `3/4`, `0.75` and `\frac{3}{4}` are the same answer. A local normalizer settles almost everything; only genuinely ambiguous cases cost a model call. Wrong answers get a diagnosis of the specific slip, not "incorrect".
 - **A practice record you can't fake** — every score, meter and stat is reconstructed from `attempts` rows written server-side. There is no progress column to forge.
 - **Review queue** — the problems you actually missed, ranked worst-first, rebuilt into a fresh set for free.
@@ -68,6 +69,8 @@ flowchart LR
 3. **AI generation** — one batched authoring call per format, then verification fanned out at a bounded concurrency.
 
 Two budgets exist because a short set beats no set: a 230s build deadline stops *starting* new rounds inside the route's 300s limit, and capacity failures break out of the loop with whatever was already gathered rather than throwing.
+
+The route has three branches into that pipeline. **Manual** takes the builder form's settings. **Targeted** takes a plan id and rebuilds the config from your own practice record. **Material** takes the id of something you uploaded and reads its stored digest. The last two skip steps 1 and 2 entirely — a set sold as written for you cannot be filled from a pool authored for whoever asked first — and both rebuild everything that reaches a prompt server-side, because a client that could write those strings could write the authoring instructions.
 
 > [!NOTE]
 > Every model call in the app goes through one function, `callStructured()` in `src/lib/ai/provider.ts`. It returns `null` for unusable output (callers must degrade) and throws only when the entire model chain is rate-limited. Swapping providers is a change to that one file.
@@ -186,7 +189,10 @@ npx vitest run -t "normalizeMath"               # one test by name
 - **`formats.test.ts`** — the per-format round trip: author → split into DB columns → grade → render → print. Keyed off `PROBLEM_FORMATS`, so a new format without a fixture fails here rather than in production.
 - **`disclosure.test.ts`** — the rule deciding whether the answer key is in a response, stated as an invariant: across every mode and prior state, nothing both offers a retry and discloses the answer.
 - **`coach-plan.test.ts`** — targeted-set configuration. A security boundary as much as a feature: `focus.directives` reaches a model prompt verbatim, so this asserts what comes out is always buildable and that mistake notes are flattened before they land inside a quoted string.
-- **`production.test.ts`** — the CSP builder, the daily-limit table, `siteUrl()` resolution order, sign-in error copy, and the share-code guard.
+- **`production.test.ts`** — the CSP builder, the daily-limit table, `siteUrl()` resolution order, sign-in error copy, the share-code guard, and the robots.txt crawler policy.
+- **`client-bundle.test.ts`** — that no client component can statically reach zod, KaTeX, the model SDK or the Supabase browser SDK. Four prose rules that nothing enforced until one of them broke and put 283 kB of zod on the landing page.
+- **`materials.test.ts`** — what an uploaded document is allowed to become. The digest is the only route from a file to an authoring prompt, and every bound on it is applied in code rather than by the schema, so this is the thing that enforces them.
+- **`material-pool.test.ts`** — that problems written from one student's upload cannot collide with the shared pool. `status` alone looks sufficient and isn't; the upsert would overwrite it in either direction.
 - **`analytics.test.ts`** — streaks, smoothing and weakness ranking, run against a pure `aggregate()`.
 - **`plot.test.ts`** — plot geometry and SVG output, which is a pure string.
 - **`scan.test.ts`** — the "not attempted" rule that keeps a blank from being recorded as a miss.

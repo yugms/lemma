@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { SCAN_BUCKET } from "@/lib/worksheets";
+import { MATERIAL_BUCKET, materialPathsFor } from "@/lib/materials";
 
 /**
  * Destroying a student's own data, on their own instruction.
@@ -11,9 +12,9 @@ import { SCAN_BUCKET } from "@/lib/worksheets";
  * silently report success.
  *
  * Ordering matters. Storage is cleared before the account, because deleting the
- * auth user cascades every Postgres row — including the `worksheet_uploads`
- * records that say which files exist — and orphaned objects in a private bucket
- * cannot be found again afterwards.
+ * auth user cascades every Postgres row — including the `worksheet_uploads` and
+ * `study_materials` records that say which files exist — and orphaned objects in
+ * a private bucket cannot be found again afterwards.
  */
 
 /**
@@ -26,6 +27,8 @@ export type AccountSummary = {
   attempts: number | null;
   sessions: number | null;
   scans: number | null;
+  /** Study material read. The files are long gone; the description is not. */
+  materials: number | null;
   /** Whether a coach read is cached. Not user-authored, but it is their data. */
   hasCoachRead: boolean;
 };
@@ -55,16 +58,17 @@ export async function loadAccountSummary(userId: string): Promise<AccountSummary
       .eq(column, userId);
     return error ? null : n;
   };
-  const [sets, attempts, sessions, scans, coach] = await Promise.all([
+  const [sets, attempts, sessions, scans, materials, coach] = await Promise.all([
     count("problem_sets", "owner_id"),
     count("attempts", "user_id"),
     count("study_sessions", "user_id"),
     count("worksheet_uploads", "user_id"),
+    count("study_materials", "user_id"),
     count("coach_reads", "user_id"),
   ]);
   // Unknown is not "no coach read", but there is nothing to show either way and
   // it never gates a control.
-  return { sets, attempts, sessions, scans, hasCoachRead: (coach ?? 0) > 0 };
+  return { sets, attempts, sessions, scans, materials, hasCoachRead: (coach ?? 0) > 0 };
 }
 
 /**
@@ -100,6 +104,22 @@ async function clearScans(userId: string): Promise<void> {
 }
 
 /**
+ * Study material, and anything left of the files it came from.
+ *
+ * There should be nothing in the bucket: analysis sweeps as it finishes, on the
+ * failure path too. This is the backstop for an upload that never reached the
+ * route — a tab closed between the storage write and the POST leaves objects
+ * with no row naming them, and this is the only thing that would ever find them
+ * again.
+ */
+async function clearMaterials(userId: string): Promise<void> {
+  const db = createServiceClient();
+  const paths = await materialPathsFor(userId);
+  if (paths.length > 0) await db.storage.from(MATERIAL_BUCKET).remove(paths);
+  await db.from("study_materials").delete().eq("user_id", userId);
+}
+
+/**
  * Wipe practice history, keeping the sets themselves.
  *
  * Sets are the expensive half — each one cost model calls and a slot against a
@@ -120,6 +140,12 @@ export async function clearHistory(userId: string): Promise<void> {
 export async function deleteAllData(userId: string): Promise<void> {
   const db = createServiceClient();
   await clearHistory(userId);
+  // Material goes here rather than with the history above, on the same
+  // reasoning that keeps sets out of `clearHistory`: reading one cost a model
+  // call and a slot against a daily cap, and more sets can still be built from
+  // it without re-uploading. "Start this again" should not mean "pay for it
+  // again".
+  await clearMaterials(userId);
   // `problem_set_items` cascades from the set; `attempts.set_id` is ON DELETE
   // SET NULL, but history is already gone by this point.
   await db.from("problem_sets").delete().eq("owner_id", userId);
@@ -134,7 +160,7 @@ export async function deleteAllData(userId: string): Promise<void> {
  */
 export async function deleteAccount(userId: string): Promise<{ error?: string }> {
   const db = createServiceClient();
-  await clearScans(userId);
+  await Promise.all([clearScans(userId), clearMaterials(userId)]);
   const { error } = await db.auth.admin.deleteUser(userId);
   return error ? { error: error.message } : {};
 }

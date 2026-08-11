@@ -125,6 +125,7 @@ describe.skipIf(!process.env.SUPABASE_SECRET_KEY)("account deletion", () => {
       ["study_sessions", "user_id"],
       ["coach_reads", "user_id"],
       ["worksheet_uploads", "user_id"],
+      ["study_materials", "user_id"],
     ] as const) {
       const { count } = await database()
         .from(table)

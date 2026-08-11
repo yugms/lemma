@@ -19,6 +19,7 @@ import {
 } from "../age-gate";
 import { describeSignInError, SIGN_IN_FALLBACK } from "../auth-errors";
 import { newShareCode, normalizeShareCode, SHARE_CODE_ALPHABET } from "../share-code";
+import robots, { AI_AGENTS } from "../../app/robots";
 import nextConfig from "../../../next.config";
 
 /**
@@ -229,7 +230,57 @@ describe("daily limits", () => {
   });
 });
 
+describe("robots.txt", () => {
+  const rules = () => {
+    const result = robots().rules;
+    return Array.isArray(result) ? result : [result];
+  };
+
+  it("keeps the private paths out of every group that is allowed in", () => {
+    // Named user-agent groups replace the wildcard group rather than adding to
+    // it, so a crawler matching one of these never reads the `*` rule. Listing
+    // an agent by name to grant it access therefore also grants it everything
+    // the wildcard rule was holding back, unless the disallows are repeated.
+    for (const rule of rules()) {
+      if (rule.disallow === "/") continue;
+      expect(rule.disallow, `${String(rule.userAgent)} is allowed in`).toEqual(
+        AI_AGENTS.privatePaths
+      );
+    }
+  });
+
+  it("puts each AI agent in exactly one group", () => {
+    // A user-agent named twice is resolved by the crawler, not by us, and the
+    // two vendors' search and training bots have confusingly similar names —
+    // `ClaudeBot` trains, `Claude-SearchBot` searches.
+    const all = [...AI_AGENTS.search, ...AI_AGENTS.training];
+    expect(new Set(all.map((a) => a.toLowerCase())).size).toBe(all.length);
+  });
+
+  it("blocks the training crawlers outright", () => {
+    const blocked = rules().find((r) => r.disallow === "/");
+    expect(blocked?.userAgent).toEqual(AI_AGENTS.training);
+    for (const agent of ["GPTBot", "ClaudeBot", "CCBot", "Google-Extended"]) {
+      expect(AI_AGENTS.training).toContain(agent);
+      expect(AI_AGENTS.search).not.toContain(agent);
+    }
+  });
+
+  it("still points at the sitemap", () => {
+    expect(robots().sitemap).toBe(`${siteUrl()}/sitemap.xml`);
+  });
+});
+
 describe("per-network limits", () => {
+  it("measures every bucket against a per-user cap that exists", () => {
+    // The check below indexes DAILY_LIMITS by an IP_LIMITS key through a cast,
+    // so a bucket with no matching daily cap reads `undefined.member` and takes
+    // the whole suite down with a TypeError rather than naming what is missing.
+    for (const kind of Object.keys(IP_LIMITS)) {
+      expect(DAILY_LIMITS[kind as LimitKind], `${kind} has no per-user cap`).toBeDefined();
+    }
+  });
+
   it("leaves room for a shared network on every bucket", () => {
     // The failure mode these are tuned against is a classroom or a library
     // behind one address, where thirty students look like one caller. A burst
@@ -370,6 +421,7 @@ describe("account summary counts", () => {
     attempts: null,
     sessions: null,
     scans: null,
+    materials: null,
     hasCoachRead: false,
   };
 
@@ -380,11 +432,19 @@ describe("account summary counts", () => {
     // nothing to remove when there may well be.
     expect(isEmpty(unknown.attempts)).toBe(false);
     expect(isEmpty(unknown.sets)).toBe(false);
+    expect(isEmpty(unknown.materials)).toBe(false);
     expect(isEmpty(0)).toBe(true);
   });
 
   it("distinguishes unknown from zero at the type level", () => {
-    const empty: AccountSummary = { ...unknown, sets: 0, attempts: 0, sessions: 0, scans: 0 };
+    const empty: AccountSummary = {
+      ...unknown,
+      sets: 0,
+      attempts: 0,
+      sessions: 0,
+      scans: 0,
+      materials: 0,
+    };
     expect(empty.sets).toBe(0);
     expect(unknown.sets).toBeNull();
     // A renderer showing `value ?? "—"` must produce a dash, not a zero.

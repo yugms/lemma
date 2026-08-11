@@ -6,7 +6,10 @@ import { prepareProblem } from "@/lib/math-render";
 import { FlashcardEngine } from "@/components/practice/flashcard-engine";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Flashcards" };
+export const metadata: Metadata = {
+  title: "Flashcards",
+  description: "Work through a set unscored, repeating it as often as you like. Nothing here counts toward your record.",
+};
 
 export default async function FlashcardsPage({
   params,

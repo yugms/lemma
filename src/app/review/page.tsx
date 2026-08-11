@@ -9,7 +9,11 @@ import { RedoButton } from "@/components/review/redo-button";
 import { formatLabel, formatRelativeDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Review" };
+export const metadata: Metadata = {
+  title: "Review",
+  description:
+    "The problems you actually missed, ranked worst-first and rebuilt into a fresh set — free, since nothing new has to be written.",
+};
 
 export default async function ReviewPage() {
   const user = await getCurrentUser();

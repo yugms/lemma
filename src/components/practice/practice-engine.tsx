@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { ArrowLeft, ArrowRight, Check, Eye, Flag, RotateCcw, X } from "lucide-react";
 import { ProblemCard } from "@/components/problem-card";
 import { Prose } from "@/components/latex";
+import { EmptySet } from "@/components/practice/empty-set";
 import { formatDuration } from "@/lib/format";
 import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
 import type { Outcome } from "@/lib/progress";
@@ -244,7 +245,10 @@ export function PracticeEngine({
     return () => window.removeEventListener("keydown", onKey);
   }, [current, problems.length, go]);
 
-  if (!problem) return null;
+  // Only reachable for a set with no problems, which a build that delivered
+  // nothing can produce. Rendering null left a page with an empty `<main>` and
+  // no heading at all — a blank screen with no explanation and no way out.
+  if (!problem) return <EmptySet setId={set.id} />;
 
   /* ── Summary ─────────────────────────────────────────────────── */
 

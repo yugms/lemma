@@ -81,11 +81,16 @@ export function GraphSketchInput({
       </p>
 
       <div className="relative overflow-hidden rounded-[3px] border border-line bg-surface">
-        <div aria-hidden className="[&>svg]:block" dangerouslySetInnerHTML={{ __html: svg }} />
+        {/* Not `aria-hidden` — see the same note in `graph-points.tsx`. The
+            plot describes the axes and any reference curve; the handles below
+            describe the controls. */}
+        <div className="[&>svg]:block" dangerouslySetInnerHTML={{ __html: svg }} />
 
         <svg
           viewBox={`0 0 ${PLOT_W} ${PLOT_H}`}
           preserveAspectRatio="xMidYMid meet"
+          role="group"
+          aria-label="Curve handles"
           className="absolute inset-0 h-full w-full touch-none"
           onPointerMove={(e) => {
             if (dragging === null || disabled) return;

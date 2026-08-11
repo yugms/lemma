@@ -7,7 +7,10 @@ import { prepareProblem } from "@/lib/math-render";
 import { QuizEngine } from "@/components/practice/quiz-engine";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Quiz" };
+export const metadata: Metadata = {
+  title: "Quiz",
+  description: "Answer the whole set with nothing disclosed, then hand it in and see every result at once.",
+};
 
 export default async function QuizPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
