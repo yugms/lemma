@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Check } from "lucide-react";
+import { useCoarsePointer } from "@/lib/use-coarse-pointer";
 import {
   evalCurve,
   plotGeometry,
@@ -47,7 +48,15 @@ export function GraphSketchInput({
   solutionSvg?: string;
 }) {
   const g = useMemo(() => plotGeometry(win), [win]);
+  const coarse = useCoarsePointer();
   const [dragging, setDragging] = useState<number | null>(null);
+  /** Which pointer owns the drag, so a second finger can't hijack it. */
+  const activePointer = useRef<number | null>(null);
+
+  function endDrag() {
+    activePointer.current = null;
+    setDragging(null);
+  }
 
   const curve = curveFromHandles(kind, handles);
   const labels = HANDLE_LABELS[kind];
@@ -80,7 +89,9 @@ export function GraphSketchInput({
         {solutionSvg ? "Your curve" : `Position the ${labels.length} handles`}
       </p>
 
-      <div className="relative overflow-hidden rounded-[3px] border border-line bg-surface">
+      {/* Full-bleed on a phone, same as graph-points: the handles and the curve
+          are both easier to place with 48px more to place them in. */}
+      <div className="relative -mx-6 overflow-hidden border-y border-line bg-surface sm:mx-0 sm:rounded-[3px] sm:border-x">
         {/* Not `aria-hidden` — see the same note in `graph-points.tsx`. The
             plot describes the axes and any reference curve; the handles below
             describe the controls. */}
@@ -91,21 +102,35 @@ export function GraphSketchInput({
           preserveAspectRatio="xMidYMid meet"
           role="group"
           aria-label="Curve handles"
-          className="absolute inset-0 h-full w-full touch-none"
+          // `touch-none` only while a drag is live. Left on permanently — as it
+          // was — the overlay covers the whole plot, so a finger put down
+          // anywhere on a ~350×260 band of the screen to scroll past the graph
+          // did nothing, and the page read as frozen.
+          className={`absolute inset-0 h-full w-full ${dragging !== null ? "touch-none" : ""}`}
           onPointerMove={(e) => {
             if (dragging === null || disabled) return;
+            // A second finger landing mid-drag would otherwise steer the handle.
+            if (activePointer.current !== null && e.pointerId !== activePointer.current) return;
             const p = pointAt(e);
             if (p) onMove(dragging, p);
           }}
-          onPointerUp={() => setDragging(null)}
-          onPointerLeave={() => setDragging(null)}
+          onPointerUp={endDrag}
+          // `pointercancel` fires — and `pointerup` does not — when the OS takes
+          // the touch away for an edge swipe, a notification, a call. Without
+          // this the drag stayed latched, and the next finger that crossed the
+          // plot moved a handle with nothing pressed.
+          onPointerCancel={endDrag}
+          onLostPointerCapture={endDrag}
         >
           {path && (
             <path
               d={path}
               fill="none"
               stroke="var(--fg)"
-              strokeWidth={2}
+              // 2 viewBox units is 1.3 CSS px once this plot is scaled to a
+              // phone, with the dashes narrower still — the student's own curve
+              // was the faintest thing on screen while they positioned it.
+              strokeWidth={coarse ? 3 : 2}
               strokeDasharray="5 3"
               strokeLinecap="round"
             />
@@ -116,7 +141,7 @@ export function GraphSketchInput({
               <circle
                 cx={g.toPxX(h.x)}
                 cy={g.toPxY(h.y)}
-                r={7}
+                r={coarse ? 10 : 7}
                 fill="var(--paper)"
                 stroke="var(--fg)"
                 strokeWidth={2}
@@ -124,17 +149,26 @@ export function GraphSketchInput({
               <circle
                 cx={g.toPxX(h.x)}
                 cy={g.toPxY(h.y)}
-                r={13}
+                // Generous on touch in a way the point lattice cannot be: there
+                // are two handles and they are normally far apart, and if they
+                // do coincide `curveFromHandles` returns null, so the worst case
+                // is an inert submit button rather than a wrong answer.
+                r={coarse ? 30 : 13}
                 fill="transparent"
                 tabIndex={disabled ? -1 : 0}
                 role="slider"
                 aria-label={`${labels[i]} handle`}
                 aria-valuetext={`${h.x}, ${h.y}`}
                 aria-valuenow={h.x}
-                className="cursor-grab outline-none focus-visible:stroke-[var(--accent)] focus-visible:[stroke-width:2]"
+                className="cursor-grab touch-none outline-none focus-visible:stroke-[var(--accent)] focus-visible:[stroke-width:2]"
                 onPointerDown={(e) => {
                   if (disabled) return;
-                  e.currentTarget.releasePointerCapture?.(e.pointerId);
+                  // Capture on the SVG, not the handle. The move handler lives
+                  // on the SVG, and without capture a thumb that leaves the
+                  // ~260px-tall plot dropped the drag mid-placement — silently,
+                  // with the handle left wherever the edge happened to be.
+                  e.currentTarget.ownerSVGElement?.setPointerCapture(e.pointerId);
+                  activePointer.current = e.pointerId;
                   setDragging(i);
                 }}
                 onKeyDown={(e) => {
@@ -162,7 +196,8 @@ export function GraphSketchInput({
 
       <p className="mono-meta mt-3">
         {handles.map((h, i) => `${labels[i]} (${h.x}, ${h.y})`).join("   ")}
-        {!disabled && "  ·  drag, or focus a handle and use the arrow keys"}
+        {/* The arrow-key route is not worth naming to someone holding a phone. */}
+        {!disabled && (coarse ? "  ·  drag a handle" : "  ·  drag, or focus a handle and use the arrow keys")}
       </p>
 
       {solutionSvg && (
@@ -172,7 +207,7 @@ export function GraphSketchInput({
             The correct curve
           </p>
           <div
-            className="overflow-hidden rounded-[3px] border border-line bg-surface [&>svg]:block"
+            className="-mx-6 overflow-hidden border-y border-line bg-surface sm:mx-0 sm:rounded-[3px] sm:border-x [&>svg]:block"
             dangerouslySetInnerHTML={{ __html: solutionSvg }}
           />
         </div>

@@ -551,9 +551,12 @@ export function ProblemCard({
 
           {problem.response_kind === "value" && (
             <div className="mt-8">
-              {/* The plot is the question here, so it is shown but not touched. */}
+              {/* The plot is the question here, so it is shown but not touched.
+                  Full-bleed on a phone all the same — reading a value off a
+                  302px plot is the same task as reading it off a 350px one,
+                  only harder. */}
               <div
-                className="overflow-hidden rounded-[3px] border border-line bg-surface [&>svg]:block"
+                className="-mx-6 overflow-hidden border-y border-line bg-surface sm:mx-0 sm:rounded-[3px] sm:border-x [&>svg]:block"
                 dangerouslySetInnerHTML={{ __html: problem.plot_svg ?? "" }}
               />
               <div className="relative mt-4">
