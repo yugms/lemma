@@ -33,6 +33,21 @@ Vitest resolves `@/*` → `src/*` via `vitest.config.ts` (mirrors `tsconfig.json
 
 There is no local database. Schema lives in the Supabase project's migration history, not in this repo — inspect and change it through the Supabase MCP server (`.mcp.json`), not files.
 
+## Git and GitHub
+
+**Use git the way a developer on this repo would, without being asked each time.** Fetch, branch, commit, push and open PRs as ordinary parts of doing the work. Standing authorization — don't stop to ask permission for any of the below.
+
+- **Start from the remote, not from whatever is checked out.** `git fetch origin` first, and branch off `origin/main`. A branch cut from a stale local `main`, or from a feature branch that has already been merged, silently rebases the diff onto the wrong base — check `git log --oneline -1 origin/main` before branching rather than trusting the working copy. Fast-forward local `main` while you are there.
+- **Never commit to `main`.** Branch first, always: `feat/…`, `fix/…`, `perf/…`, `prod/…`, matching what is already in the history.
+- **Commit as the feature takes shape, not once at the end.** A commit per coherent change, made when that change is finished and green. Uncommitted work is invisible to `git diff`, unreviewable, and impossible to revert in pieces; a single 3,000-line commit spanning five features is only marginally better. If a session has produced several unrelated things, split them before committing.
+- **Every commit typechecks and passes `npm run test` on its own.** The stack has to be bisectable, so a commit that only compiles once a later one lands is a commit in the wrong order. When a file legitimately spans two concerns, prefer assigning it whole to the commit its dominant change belongs to over hunk surgery that leaves an intermediate commit broken — an unrelated rider in the right commit costs less than an unbuildable tree.
+- **Push the branch and open a PR** when the work is complete. Body says what changed and why, in the same register as the commit messages.
+- **Commit messages match the existing history**: an imperative sentence saying what changed and, in the body, *why* — the failure it prevents, the thing that looked sufficient and wasn't. `git log` here is the record of decisions this file summarizes, so "Add materials feature" is a worse message than "Don't let one unreachable checker discard the whole set". No Conventional Commits prefixes; nothing in the log uses them.
+
+Two things still warrant asking first, because neither is recoverable from the reflog by the person who has to notice it went wrong: force-pushing a branch someone else may have pulled, and merging a PR.
+
+**The DB is not in the repo, so a migration cannot ride along in a commit.** A schema change is applied to the live Supabase project via MCP and is live the moment it is applied — before the code that needs it is written, let alone merged. Migrations therefore have to be additive and safe against the currently deployed code: `problems.status` shipped with `DEFAULT 'active'` precisely so the deployed build, which knew nothing about the column, kept inserting successfully. Name the applied migrations in the commit message of the code that depends on them, since nothing else connects the two.
+
 ## Architecture
 
 ### The generation pipeline is the core of the app
