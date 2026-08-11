@@ -9,6 +9,7 @@ import { CorrectOrder, OrderingInput } from "@/components/problem-inputs/orderin
 import { MatchingInput } from "@/components/problem-inputs/matching";
 import { MultiPartInput } from "@/components/problem-inputs/multi-part";
 import { MATH_INPUT_PROPS } from "@/components/problem-inputs/math-input-props";
+import { MathKeys } from "@/components/problem-inputs/math-keys";
 import { GraphPointsInput, type Point } from "@/components/problem-inputs/graph-points";
 import {
   curveFromHandles,
@@ -191,6 +192,9 @@ export function ProblemCard({
   const verdictRef = useRef<HTMLDivElement>(null);
   const gradedHere = useRef(false);
   const statementId = useId();
+  /** The single open-answer field, for the symbol row to type into. `open`
+   *  and `graph:value` never render together, so one ref serves both. */
+  const openInputRef = useRef<HTMLInputElement>(null);
 
   const answered = result !== null;
   const retryOffered = result?.can_retry === true && !retrying;
@@ -436,6 +440,7 @@ export function ProblemCard({
           <div className="relative">
             <input
               {...MATH_INPUT_PROPS}
+              ref={openInputRef}
               value={openAnswer}
               disabled={inert || busy}
               onChange={(e) => setOpenAnswer(e.target.value)}
@@ -450,6 +455,12 @@ export function ProblemCard({
               />
             )}
           </div>
+          <MathKeys
+            value={openAnswer}
+            onChange={setOpenAnswer}
+            getInput={() => openInputRef.current}
+            disabled={inert || busy}
+          />
           <p className="mt-2.5 text-xs text-faint">
             Type math plainly — fractions as 3/4, roots as sqrt(2), powers as x^2.
           </p>
@@ -562,6 +573,7 @@ export function ProblemCard({
               <div className="relative mt-4">
                 <input
                   {...MATH_INPUT_PROPS}
+                  ref={openInputRef}
                   value={openAnswer}
                   disabled={inert || busy}
                   onChange={(e) => setOpenAnswer(e.target.value)}
@@ -576,6 +588,12 @@ export function ProblemCard({
                   />
                 )}
               </div>
+              <MathKeys
+                value={openAnswer}
+                onChange={setOpenAnswer}
+                getInput={() => openInputRef.current}
+                disabled={inert || busy}
+              />
             </div>
           )}
         </>

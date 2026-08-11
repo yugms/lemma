@@ -1,8 +1,10 @@
 "use client";
 
+import { useRef } from "react";
 import { CornerDownLeft } from "lucide-react";
 import { Math, Prose } from "@/components/latex";
 import { MATH_INPUT_PROPS } from "@/components/problem-inputs/math-input-props";
+import { MathKeys } from "@/components/problem-inputs/math-keys";
 
 export type ProblemPart = { label: string; prompt_html: string };
 
@@ -31,6 +33,8 @@ export function MultiPartInput({
   answers?: { label: string; html: string }[];
 }) {
   const key = answers ? new Map(answers.map((a) => [a.label, a.html])) : null;
+  // One entry per part, so each part's symbol row types into its own field.
+  const inputs = useRef(new Map<string, HTMLInputElement>());
 
   return (
     <ol className="mt-8 space-y-6">
@@ -46,6 +50,10 @@ export function MultiPartInput({
               <div className="relative mt-3">
                 <input
                   {...MATH_INPUT_PROPS}
+                  ref={(el) => {
+                    if (el) inputs.current.set(part.label, el);
+                    else inputs.current.delete(part.label);
+                  }}
                   value={typed}
                   disabled={disabled}
                   onChange={(e) => onChange(part.label, e.target.value)}
@@ -59,6 +67,12 @@ export function MultiPartInput({
                   />
                 )}
               </div>
+              <MathKeys
+                value={typed}
+                onChange={(next) => onChange(part.label, next)}
+                getInput={() => inputs.current.get(part.label) ?? null}
+                disabled={disabled}
+              />
               {correct && (
                 <p className="mono-meta mt-2 flex flex-wrap items-center gap-x-2">
                   <span>Answer</span>
