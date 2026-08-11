@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { Geist, Geist_Mono, Fraunces } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
+import { MobileTabBar } from "@/components/mobile-tab-bar";
 import { THEME_SCRIPT } from "@/components/theme-toggle";
 import { Wordmark } from "@/components/brand";
 import { JsonLd, siteGraph } from "@/components/json-ld";
@@ -223,6 +224,12 @@ export default async function RootLayout({
             </nav>
           </div>
         </footer>
+
+        {/* After the footer on purpose: the spacer it renders adds its height
+            at the end of the document, which is what lets the footer scroll
+            clear of a fixed bar without <main> or the footer knowing the bar
+            is there. */}
+        <MobileTabBar user={user} />
       </body>
     </html>
   );

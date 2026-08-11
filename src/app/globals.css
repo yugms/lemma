@@ -650,6 +650,52 @@
     animation: sweep 1.6s linear infinite;
   }
 
+  /* ── Phone navigation ─────────────────────────────────────────── */
+
+  /* Thumb-reachable, and unlike the header it never competes with the
+     wordmark for width. Gated at `md` to match `hidden md:flex` on the header
+     nav, so the two navigations can never both be absent. */
+  .mobile-tabs {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 40;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    border-top: 1px solid var(--line);
+    background: color-mix(in oklab, var(--paper) 88%, transparent);
+    backdrop-filter: blur(12px) saturate(1.5);
+    /* Inert without `viewport.viewportFit = "cover"` — see layout.tsx. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .mobile-tabs a {
+    display: grid;
+    place-items: center;
+    gap: 0.2rem;
+    min-height: 3.5rem;
+    padding-block: 0.5rem;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--fg-muted);
+    transition: color 0.18s ease;
+  }
+  .mobile-tabs a[aria-current="page"] {
+    color: var(--accent);
+  }
+
+  .mobile-tabs-spacer {
+    height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (width >= 48rem) {
+    .mobile-tabs,
+    .mobile-tabs-spacer {
+      display: none;
+    }
+  }
+
   /* ── Skeletons ────────────────────────────────────────────────── */
 
   .skeleton {
@@ -834,6 +880,20 @@
   display: none;
 }
 ::view-transition-new(site-header) {
+  animation: none;
+}
+
+/* Same pin for the phone bar, and for the same reason: a fixed element that
+   is not named gets captured in the root snapshot and slides with the page
+   content on every navigation. */
+::view-transition-group(mobile-tabs) {
+  animation: none;
+  z-index: 100;
+}
+::view-transition-old(mobile-tabs) {
+  display: none;
+}
+::view-transition-new(mobile-tabs) {
   animation: none;
 }
 
@@ -1028,9 +1088,14 @@
     --grain-opacity: 0;
   }
 
-  /* The app frame is navigation, and navigation does not print. */
+  /* The app frame is navigation, and navigation does not print. The tab bar
+     belongs on this list as much as the header does — /print already hides it
+     by route, but any other page sent to a printer would otherwise carry a
+     nav bar across the bottom of page one. */
   .site-header,
   body > footer,
+  .mobile-tabs,
+  .mobile-tabs-spacer,
   .print\:hidden {
     display: none !important;
   }

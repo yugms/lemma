@@ -107,7 +107,10 @@ export function ThemeToggle() {
           aria-label={label}
           title={`${label} theme`}
           onClick={(e) => id !== choice && change(id, e.currentTarget)}
-          className="flex h-7 w-7 items-center justify-center rounded-[2px] text-faint transition-colors hover:text-fg aria-pressed:bg-surface aria-pressed:text-accent aria-pressed:shadow-[0_1px_2px_rgb(var(--shadow-color)/0.06)]"
+          // `tap-44` rather than a bigger button: three 44px keys side by side
+          // would be a 132px control in a header that has 350px to spend. The
+          // segmented group stays 28px per key and the hit area overflows it.
+          className="tap-44 flex h-7 w-7 items-center justify-center rounded-[2px] text-faint transition-colors hover:text-fg aria-pressed:bg-surface aria-pressed:text-accent aria-pressed:shadow-[0_1px_2px_rgb(var(--shadow-color)/0.06)]"
         >
           <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
         </button>
