@@ -1,5 +1,7 @@
 "use client";
 
+import { flushSync } from "react-dom";
+
 /**
  * The characters a phone keyboard buries, next to the field that needs them.
  *
@@ -32,7 +34,7 @@ type Key = {
 const KEYS: Key[] = [
   { label: "/", text: "/", name: "divided by" },
   { label: "^", text: "^", name: "to the power of" },
-  { label: "( )", text: "()", back: 1, name: "brackets" },
+  { label: "()", text: "()", back: 1, name: "brackets" },
   { label: "√", text: "sqrt()", back: 1, name: "square root" },
   { label: "π", text: "pi", name: "pi" },
   { label: "×", text: "*", name: "times" },
@@ -64,14 +66,16 @@ export function MathKeys({
     const end = el.selectionEnd ?? start;
     const next = value.slice(0, start) + key.text + value.slice(end);
     const caret = start + key.text.length - (key.back ?? 0);
-    onChange(next);
-    // React writes the new value on the next render, so the caret has to be
-    // restored after it — otherwise it lands at the end of the field and the
-    // brackets this just opened are somewhere behind the cursor.
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(caret, caret);
-    });
+    // `flushSync` so the caret can be placed in the same tick. The selection has
+    // to be set *after* React writes the value — set earlier it lands on the old
+    // string and gets clamped — and the obvious way to wait, a
+    // requestAnimationFrame, does not fire at all while the tab is in the
+    // background. That failure is silent and leaves the caret past the closing
+    // bracket rather than between the two, which is the one thing this control
+    // exists to get right.
+    flushSync(() => onChange(next));
+    if (document.activeElement !== el) el.focus();
+    el.setSelectionRange(caret, caret);
   }
 
   return (
