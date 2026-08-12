@@ -43,17 +43,27 @@ const modelList = (env: string | undefined, fallback: string[]) =>
  * to an older sibling rather than failing a student's request outright.
  */
 
-/** Authors problems and repairs them. Needs the most reasoning. */
+/**
+ * Authors problems and repairs them. Needs the most reasoning.
+ *
+ * The strong models lead and the lites catch what falls through, which is the
+ * point of ordering the chain — but only works if the tail is alive. It was
+ * not: `gemini-2.5-flash` sat at the end of both chains and answers 404 ("no
+ * longer available to new users"), so the fallback that was supposed to absorb
+ * a rate-limited flash absorbed nothing. The two flash models share a 20/day
+ * free-tier cap between them, so the lites are the working budget most days.
+ */
 export const GENERATOR_MODELS = modelList(process.env.GEMINI_GENERATOR_MODELS, [
   "gemini-3.5-flash",
   "gemini-3.6-flash",
-  "gemini-2.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
 ]);
 /** Independent solver, answer-equivalence, misconception feedback. Cheap and fast. */
 export const CHECKER_MODELS = modelList(process.env.GEMINI_CHECKER_MODELS, [
   "gemini-3.5-flash-lite",
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-flash-lite-latest",
 ]);
 
 /**
@@ -198,13 +208,94 @@ function thinkingConfigFor(model: string, level: "low" | "medium") {
   };
 }
 
-function isRetryable(err: unknown): boolean {
+/**
+ * Google states the wait it wants twice — once in prose, once in a RetryInfo
+ * detail — and neither survives into an Error field, so it is read back out of
+ * the message. Worth honouring: a fixed backoff either sleeps through a wait
+ * that was over in two seconds or hammers a limit that wanted forty.
+ */
+function retryAfterMs(message: string): number | null {
+  const m =
+    message.match(/retry in ([\d.]+)\s*s/i) ?? message.match(/"retryDelay"\s*:\s*"([\d.]+)s"/i);
+  if (!m) return null;
+  const seconds = Number(m[1]);
+  return Number.isFinite(seconds) ? Math.round(seconds * 1000) : null;
+}
+
+/**
+ * How a call failed, in the three ways that call for different responses.
+ *
+ * This used to be a boolean, and the case it collapsed is the one that broke
+ * production: a model retired out from under the chain answers 404, which is
+ * not retryable, and "not retryable" meant *abandon the whole chain and return
+ * null*. So when both flash models were rate-limited and the 2.5 fallback
+ * behind them was dead, the capacity error never reached the throw that says
+ * so — every caller saw an ordinary null, and a student was told no problem
+ * passed verification when nothing had been written to verify.
+ */
+type Failure =
+  /** Busy. Worth another attempt here, then the next model. */
+  | { kind: "capacity"; retryAfterMs: number | null }
+  /** This model can't serve it; says nothing about the next one. Skip it. */
+  | { kind: "model"; blockForMs: number }
+  /** The request is wrong. Every model fails it identically — stop. */
+  | { kind: "request" };
+
+/**
+ * A daily cap won't clear inside this request, but Google's own retryDelay
+ * disagrees — it offered 39s against a quota it documents as per-day — so the
+ * hint is floored rather than trusted. Long enough that one build stops
+ * rediscovering the same exhausted model on all ~100 of its calls, short enough
+ * that a sliding window handing capacity back is picked up in the same session.
+ */
+const MIN_QUOTA_BLOCK_MS = 60_000;
+/** A retired model is not coming back; this only bounds a misread 404. */
+const MODEL_GONE_MS = 60 * 60_000;
+
+function classify(err: unknown): Failure {
   const status = (err as { status?: number })?.status;
-  if (status === 429 || status === 500 || status === 503) return true;
   const name = (err as { name?: string })?.name;
-  if (name === "AbortError" || name === "TimeoutError") return true;
   const message = String((err as { message?: string })?.message ?? err);
-  return /RESOURCE_EXHAUSTED|UNAVAILABLE|429|503|overloaded|abort|timed? ?out/i.test(message);
+
+  if (name === "AbortError" || name === "TimeoutError")
+    return { kind: "capacity", retryAfterMs: null };
+
+  if (status === 404 || /NOT_FOUND|no longer available/i.test(message))
+    return { kind: "model", blockForMs: MODEL_GONE_MS };
+
+  if (status === 429 || /RESOURCE_EXHAUSTED|\b429\b/.test(message)) {
+    const wait = retryAfterMs(message);
+    // Per-day and per-minute quotas arrive as the same status and read the same
+    // in prose; only `quotaId` separates them, and the difference is whether
+    // waiting is worth anything at all.
+    if (/PerDay|RequestsPerDay/i.test(message))
+      return { kind: "model", blockForMs: Math.max(wait ?? 0, MIN_QUOTA_BLOCK_MS) };
+    return { kind: "capacity", retryAfterMs: wait };
+  }
+
+  if (status === 500 || status === 503 || /UNAVAILABLE|\b503\b|overloaded/i.test(message))
+    return { kind: "capacity", retryAfterMs: retryAfterMs(message) };
+
+  if (/abort|timed? ?out/i.test(message)) return { kind: "capacity", retryAfterMs: null };
+
+  return { kind: "request" };
+}
+
+/**
+ * Models known to be out of quota, and when they are worth trying again.
+ *
+ * Module scope so it outlives one build on a warm lambda, keyed by model
+ * because the quotas are per-model. Without it, every one of the ~100 calls a
+ * set build makes rediscovers the same exhausted model — three attempts and two
+ * backoffs each — which is most of the minute a failing build spent spinning.
+ */
+const modelBlockedUntil = new Map<string, number>();
+
+const modelIsBlocked = (model: string) => (modelBlockedUntil.get(model) ?? 0) > Date.now();
+
+/** Exported for tests; a process restart clears it anyway. */
+export function clearModelBlocks() {
+  modelBlockedUntil.clear();
 }
 
 /** Models occasionally wrap JSON in a code fence even under a response schema. */
@@ -305,8 +396,18 @@ export async function callStructured<T>({
     ? [...images.map((image) => ({ inlineData: image })), { text: prompt }]
     : prompt;
 
+  /** Models skipped outright because they are already known to be out. */
+  const skipped: string[] = [];
+
   for (const model of models) {
-    for (let attempt = 1; attempt <= ATTEMPTS_PER_MODEL; attempt++) {
+    if (modelIsBlocked(model)) {
+      skipped.push(model);
+      continue;
+    }
+    // Set when this model turns out to be unusable, so the remaining attempts
+    // against it are abandoned without abandoning the models behind it.
+    let modelIsDone = false;
+    for (let attempt = 1; attempt <= ATTEMPTS_PER_MODEL && !modelIsDone; attempt++) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
       calls++;
@@ -359,26 +460,52 @@ export async function callStructured<T>({
         outcome(parsed.success ? "ok" : "schema-mismatch");
         return parsed.success ? parsed.data : null;
       } catch (err) {
-        // A bad request or unparseable response is this model's own problem —
-        // another model would fail the same way. Only capacity errors fall through.
-        if (!isRetryable(err)) {
+        const failure = classify(err);
+        // A malformed request or unparseable response is the request's own
+        // problem — another model fails it identically, so stop here.
+        if (failure.kind === "request") {
           trace({ label, model, calls, ms: elapsed(), result: "rejected", error: errorText(err) });
           return null;
         }
         lastError = err;
+        if (failure.kind === "model") {
+          modelBlockedUntil.set(model, Date.now() + failure.blockForMs);
+          trace({ label, model, calls, ms: elapsed(), result: "unusable", error: errorText(err) });
+          modelIsDone = true;
+          continue;
+        }
         trace({ label, model, calls, ms: elapsed(), result: "retryable", error: errorText(err) });
         if (attempt < ATTEMPTS_PER_MODEL) {
-          await sleep(Math.min(attempt * 1500, Math.max(0, deadline - Date.now())));
+          const room = Math.max(0, deadline - Date.now());
+          const wait = failure.retryAfterMs ?? attempt * 1500;
+          // Sleeping past our own deadline helps nobody — hand what is left of
+          // the budget to the next model instead.
+          if (wait > room) break;
+          await sleep(wait);
         }
       }
     }
   }
 
-  trace({ label, calls, ms: elapsed(), result: "exhausted", error: errorText(lastError) });
+  trace({
+    label,
+    calls,
+    ms: elapsed(),
+    result: "exhausted",
+    error: lastError ? errorText(lastError) : undefined,
+    skipped: skipped.length ? skipped.join(",") : undefined,
+  });
+  // Reaching here means capacity, not correctness — every path that blames the
+  // request returns null above. Callers distinguish the two, and a student is
+  // told the writer is busy rather than that their settings were unusable.
   throw new Error(
     `Every model was rate-limited, overloaded, or too slow within ${Math.round(budgetMs / 1000)}s ` +
-      `(${models.join(", ")}). Last error: ` +
-      (lastError instanceof Error ? lastError.message : String(lastError))
+      `(${models.join(", ")}). ` +
+      (lastError instanceof Error
+        ? `Last error: ${lastError.message}`
+        : skipped.length === models.length
+          ? "All models are out of quota for now."
+          : `Last error: ${String(lastError)}`)
   );
 }
 
