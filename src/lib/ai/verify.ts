@@ -5,9 +5,11 @@ import {
   assertNeverFormat,
   assertNeverGraphResponse,
   GeneratedProblem,
+  OpenAnswer,
   SolverResult,
   SolverResultSchema,
 } from "@/lib/ai/schemas";
+import { askModelIfEquivalent, type EquivalenceCheck } from "@/lib/ai/equivalence";
 import { curveFromAuthored, curvesMatch, plotFromSpec, pointsMatch } from "@/lib/plot";
 import { inlineShape } from "@/lib/math-render";
 import {
@@ -299,6 +301,14 @@ export async function solveIndependently(p: GeneratedProblem): Promise<SolverRes
     default:
       assertNeverFormat(p);
   }
+  // The solver is instructed to reject a self-contradictory problem, and an
+  // error_analysis statement contains a deliberate mistake — so without this it
+  // correctly reports the planted error as a defect and the problem is thrown
+  // away for being exactly what it was written to be. Framing only: it is told
+  // an error exists, never which one, so the solve stays independent.
+  if (p.style === "error_analysis") {
+    statement += `\n\n(This problem quotes a worked solution that deliberately contains exactly one mistake and asks for it to be found. The mistake is the subject of the question, not a flaw in the problem: treat the problem as well-posed, and answer with the error and its correction.)`;
+  }
   return callStructured({
     models: CHECKER_MODELS,
     label: `solve:${p.format}`,
@@ -309,11 +319,43 @@ export async function solveIndependently(p: GeneratedProblem): Promise<SolverRes
   });
 }
 
-/** Compare the solver's independent answer against the problem's stored answer. */
-export function solverAgrees(p: GeneratedProblem, s: SolverResult): boolean {
+/**
+ * Compare the solver's independent answer against the problem's stored answer.
+ *
+ * `equivalent` is injected so a caller with no budget can pass
+ * `notEquivalentWithoutAsking` and get the old numeric-only behaviour, the same
+ * lever `checkSubmission`'s `allowAi` pulls.
+ */
+export async function solverAgrees(
+  p: GeneratedProblem,
+  s: SolverResult,
+  equivalent: EquivalenceCheck = askModelIfEquivalent
+): Promise<boolean> {
   /** Letters the solver named, however it spelled them. */
   const letters = (raw: string[] | null): string[] =>
     (raw ?? []).map((x) => x.trim().toUpperCase()).filter(Boolean);
+
+  /**
+   * Resolve an inconclusive local compare the way grading does, by asking.
+   *
+   * This is the normal case for a prose answer rather than an edge case:
+   * `checkOpenAnswer` returns "uncertain" for every `kind: "text"` answer that
+   * isn't character-identical, and `text` is what `proof`, `conceptual` and
+   * `error_analysis` necessarily produce. Resolving it to `false` here — as
+   * this did — rejected 100% of those problems on the first pass and again on
+   * the repair re-check, which is why a set of them arrived empty while drill,
+   * served entirely by templates, looked fine.
+   *
+   * A capacity failure degrades to "no agreement" rather than throwing: losing
+   * one problem beats losing the set.
+   */
+  const meansTheSame = async (given: string, a: OpenAnswer): Promise<boolean> => {
+    try {
+      return await equivalent(given, a.value_latex, a.acceptable_forms ?? []);
+    } catch {
+      return false;
+    }
+  };
 
   if (p.format === "mcq") {
     return (
@@ -347,12 +389,11 @@ export function solverAgrees(p: GeneratedProblem, s: SolverResult): boolean {
       if (sn !== null && tn !== null) return numbersEqual(sn, tn, a.tolerance);
       return false;
     }
-    // "uncertain" — treat as agreement failure is too strict; treat as pass only
-    // when numerics line up, else fail (repair pass will adjudicate).
+    // "uncertain": numerics first because they settle it for free, then ask.
     const sn = s.final_answer_numeric ?? parseNumeric(normalizeMath(s.final_answer_latex));
     const tn = a.numeric_value ?? parseNumeric(normalizeMath(a.value_latex));
     if (sn !== null && tn !== null) return numbersEqual(sn, tn, a.tolerance);
-    return false;
+    return meansTheSame(s.final_answer_latex, a);
   }
   if (p.format === "matching") {
     // Set equality on pairs: a solver that gets one pairing wrong necessarily
@@ -370,19 +411,26 @@ export function solverAgrees(p: GeneratedProblem, s: SolverResult): boolean {
     const solved = new Map(
       (s.part_answers ?? []).map((a) => [a.label.trim().toLowerCase(), a.answer_latex])
     );
-    return p.parts.every((part) => {
+    for (const part of p.parts) {
       const given = solved.get(part.label.trim().toLowerCase());
       if (given === undefined) return false;
       const res = part.answer.multi_valued
         ? checkMultiAnswer(given, part.answer)
         : checkOpenAnswer(given, part.answer);
-      if (res === "correct") return true;
+      if (res === "correct") continue;
       // Same last-chance numeric reconciliation the `open` case uses: an
       // unsimplified but numerically right part shouldn't fail the problem.
       const sn = parseNumeric(normalizeMath(given));
       const tn = part.answer.numeric_value ?? parseNumeric(normalizeMath(part.answer.value_latex));
-      return sn !== null && tn !== null && numbersEqual(sn, tn, part.answer.tolerance);
-    });
+      if (sn !== null && tn !== null) {
+        if (numbersEqual(sn, tn, part.answer.tolerance)) continue;
+        return false;
+      }
+      // A part answered in prose gets the same escalation as a whole `open`
+      // problem — the parts of a proof are prose far more often than not.
+      if (res === "incorrect" || !(await meansTheSame(given, part.answer))) return false;
+    }
+    return true;
   }
   if (p.format === "graph") {
     const plot = plotFromSpec(p.plot);
@@ -396,7 +444,10 @@ export function solverAgrees(p: GeneratedProblem, s: SolverResult): boolean {
         if (res === "correct") return true;
         const sn = s.final_answer_numeric ?? parseNumeric(normalizeMath(s.final_answer_latex));
         const tn = p.answer.numeric_value ?? parseNumeric(normalizeMath(p.answer.value_latex));
-        return sn !== null && tn !== null && numbersEqual(sn, tn, p.answer.tolerance);
+        if (sn !== null && tn !== null) return numbersEqual(sn, tn, p.answer.tolerance);
+        // Reading a value off a plot is usually numeric, so this rarely fires —
+        // but when it doesn't parse, the answer is prose and deserves the ask.
+        return res !== "incorrect" && meansTheSame(s.final_answer_latex, p.answer);
       }
       case "points":
         // Tolerant here, exact at grading time: the solver is being asked to
@@ -430,6 +481,52 @@ export function solverAgrees(p: GeneratedProblem, s: SolverResult): boolean {
   return false;
 }
 
+/**
+ * `error_analysis` hands the solver a worked solution with a deliberate mistake
+ * in it. The solver's contract tells it to fail anything "self-contradictory",
+ * so the style and the gate contradict each other outright and the style could
+ * never pass. The flaw is the question here, so only the other styles are held
+ * to it — and `solveIndependently` says as much in the prompt, so this is the
+ * backstop rather than the whole answer.
+ */
+const flawIsThePoint = (p: GeneratedProblem) => p.style === "error_analysis";
+
+/**
+ * How far the solver's difficulty estimate may sit from what was asked for.
+ *
+ * ±1 fits drill, where the rubric's "one step vs several" maps straight onto
+ * the arithmetic. Every other style adds work the rubric counts as cognitive
+ * load — translating a scenario, justifying a claim, finding a planted error —
+ * so the same problem reads a level harder to the solver than it did to the
+ * author. At the builder's default difficulty of 2 that rejected most of what
+ * was written before its answer was ever looked at.
+ */
+const difficultyTolerance = (style: GeneratedProblem["style"]) =>
+  style === "drill" ? 1.5 : 2.5;
+
+/**
+ * The gates that need a solver result, in one place so the repair re-check
+ * applies the same rules as the first pass. It used to drop the difficulty
+ * check entirely, which left a problem rejectable for a bound its repaired
+ * version was never held to.
+ *
+ * Returns the reason it failed, or null when it passed.
+ */
+export async function solverGates(
+  p: GeneratedProblem,
+  solver: SolverResult,
+  requestedDifficulty: number,
+  equivalent?: EquivalenceCheck
+): Promise<string | null> {
+  if (!solver.is_well_posed && !flawIsThePoint(p))
+    return `not well-posed: ${solver.issue ?? "unspecified"}`;
+  if (Math.abs(solver.difficulty_estimate - requestedDifficulty) > difficultyTolerance(p.style))
+    return `difficulty off: estimated ${solver.difficulty_estimate}, wanted ${requestedDifficulty}`;
+  if (!(await solverAgrees(p, solver, equivalent)))
+    return `answer mismatch: solver got ${solver.final_answer_latex}`;
+  return null;
+}
+
 /** Full verification of one AI-generated problem. */
 export async function verifyProblem(
   p: GeneratedProblem,
@@ -440,16 +537,6 @@ export async function verifyProblem(
 
   const solver = await solveIndependently(p);
   if (!solver) return { ok: false, reason: "solver call failed" };
-  if (!solver.is_well_posed)
-    return { ok: false, reason: `not well-posed: ${solver.issue ?? "unspecified"}`, solver };
-  if (Math.abs(solver.difficulty_estimate - requestedDifficulty) > 1.5)
-    return {
-      ok: false,
-      reason: `difficulty off: estimated ${solver.difficulty_estimate}, wanted ${requestedDifficulty}`,
-      solver,
-    };
-  if (!solverAgrees(p, solver))
-    return { ok: false, reason: `answer mismatch: solver got ${solver.final_answer_latex}`, solver };
-
-  return { ok: true, solver };
+  const reason = await solverGates(p, solver, requestedDifficulty);
+  return reason ? { ok: false, reason, solver } : { ok: true, solver };
 }

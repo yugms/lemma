@@ -14,7 +14,7 @@ import {
   type TaggedProblem,
 } from "@/lib/ai/schemas";
 import { generateProblems, repairProblem, type TopicInfo } from "@/lib/ai/generate";
-import { solveIndependently, solverAgrees, verifyProblem } from "@/lib/ai/verify";
+import { solveIndependently, solverGates, verifyProblem } from "@/lib/ai/verify";
 import { AI_CONCURRENCY, createCallPool } from "@/lib/ai/provider";
 import { asyncQueue } from "@/lib/async-queue";
 import { instantiate, templatesFor } from "@/lib/templates";
@@ -184,7 +184,8 @@ async function runChecks(
   const fixed = await repairProblem(p, outcome.solver);
   if (!fixed) return null;
   const recheck = await solveIndependently(fixed);
-  if (!recheck || !recheck.is_well_posed || !solverAgrees(fixed, recheck)) return null;
+  // Same gates as the first pass, rather than a subset of them — see solverGates.
+  if (!recheck || (await solverGates(fixed, recheck, difficulty)) !== null) return null;
   return {
     // repair rewrites the problem but not what topic it belongs to
     problem: { ...fixed, topic_index: p.topic_index },
@@ -420,6 +421,11 @@ export async function* buildProblemSet(
   const pool = createCallPool(AI_CONCURRENCY);
   let aiNeeded = count - chosen.length;
   let regenAttempted = false;
+  // Whether anything was ever written, which is what separates "the checks
+  // rejected all of it" from "there was nothing to check". Both used to be
+  // reported as the former, so a rate-limited build told the student their
+  // settings were at fault.
+  let authored = 0;
   while (aiNeeded > 0 && Date.now() < buildDeadline) {
     yield {
       type: "status",
@@ -463,6 +469,7 @@ export async function* buildProblemSet(
                   message: "Verifying every problem independently...",
                 });
               }
+              authored += batch.length;
               for (const p of batch) {
                 checks.push(
                   pool(() => verifyOrRepair(p, config.difficulty)).then((result) => {
@@ -544,7 +551,16 @@ export async function* buildProblemSet(
   }
 
   if (chosen.length === 0) {
-    yield { type: "error", message: "Could not generate any problems that passed verification. Try different settings." };
+    // Naming the right one matters: "try different settings" is useless advice
+    // when the settings were fine and the writer was simply unreachable, and it
+    // was the only thing this said for either case.
+    yield {
+      type: "error",
+      message:
+        authored === 0
+          ? "The AI writer is busy right now, so nothing could be written for this set. Try again in a minute."
+          : "Could not generate any problems that passed verification. Try different settings.",
+    };
     return;
   }
 

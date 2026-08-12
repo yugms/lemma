@@ -4,18 +4,19 @@ import type { TaggedProblem } from "@/lib/ai/schemas";
 vi.mock("@/lib/ai/verify", () => ({
   verifyProblem: vi.fn(),
   solveIndependently: vi.fn(),
-  solverAgrees: vi.fn(),
+  solverGates: vi.fn(),
 }));
 vi.mock("@/lib/ai/generate", () => ({ repairProblem: vi.fn(), generateProblems: vi.fn() }));
 vi.mock("@/lib/supabase/service", () => ({ createServiceClient: vi.fn() }));
 
-const { verifyProblem, solveIndependently, solverAgrees } = await import("@/lib/ai/verify");
+const { verifyProblem, solveIndependently, solverGates } = await import("@/lib/ai/verify");
 const { repairProblem } = await import("@/lib/ai/generate");
 const { verifyOrRepair } = await import("@/lib/sets");
 
 const verify = verifyProblem as unknown as Mock;
 const solve = solveIndependently as unknown as Mock;
-const agrees = solverAgrees as unknown as Mock;
+/** Returns the reason the re-check failed, or null when the repair holds. */
+const gates = solverGates as unknown as Mock;
 const repair = repairProblem as unknown as Mock;
 
 const problem = { statement_latex: "Solve 2x = 4", topic_index: 0 } as unknown as TaggedProblem;
@@ -27,7 +28,7 @@ const exhausted = () => new Error("Every model was rate-limited, overloaded, or 
 beforeEach(() => {
   verify.mockReset();
   solve.mockReset();
-  agrees.mockReset();
+  gates.mockReset();
   repair.mockReset();
 });
 
@@ -78,7 +79,7 @@ describe("verifyOrRepair outcomes", () => {
     verify.mockResolvedValue({ ok: false, reason: "answer mismatch", solver });
     repair.mockResolvedValue(fixed);
     solve.mockResolvedValue(solver);
-    agrees.mockReturnValue(true);
+    gates.mockResolvedValue(null);
 
     const result = await verifyOrRepair({ ...problem, topic_index: 1 } as TaggedProblem, 3);
     expect(result?.problem.topic_index).toBe(1);
@@ -96,7 +97,7 @@ describe("verifyOrRepair outcomes", () => {
     verify.mockResolvedValue({ ok: false, reason: "answer mismatch", solver });
     repair.mockResolvedValue(problem);
     solve.mockResolvedValue(solver);
-    agrees.mockReturnValue(false);
+    gates.mockResolvedValue("answer mismatch: solver got 3");
 
     await expect(verifyOrRepair(problem, 3)).resolves.toBeNull();
   });
