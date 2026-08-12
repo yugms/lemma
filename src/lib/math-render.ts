@@ -126,15 +126,22 @@ const PROSE_RUN = /[A-Za-z]{2,}\s+[A-Za-z]{2,}/;
 const MATH_SIGNAL = /\\[a-zA-Z]+|[\\^_{}=+\-*/<>]|\d/;
 
 /**
- * One word and a bare number and nothing else: "Step 1", "Option 2".
+ * A numbered label: "Step 1", "Option 2".
  *
  * The digit is a math signal and a single word is not a prose run, so these
  * landed in math mode and KaTeX ate the space — an error-analysis problem
- * whose choices name the steps rendered them as italic `Step1`…`Step4`. The
- * pattern admits nothing an expression needs: any operator, macro, brace or
- * second number fails it and the fragment stays math.
+ * whose choices name the steps rendered them as italic `Step1`…`Step4`.
+ *
+ * The naming word is a closed list rather than "any word", because the general
+ * form is also `sin 2` and `log 2` — an identifier applied to an argument,
+ * which is an expression and has to keep reaching KaTeX. The two failures are
+ * not symmetrical: a label this list misses is rendered exactly as it was
+ * before, while an expression caught by mistake loses its rendering *and*
+ * changes how `checkOptions` decides two choices are the same answer, since
+ * shape is what picks `normalizeMath` over a plain lowercase compare.
  */
-const LABEL = /^[A-Za-z]{2,}\s+\d{1,4}[.):]?$/;
+const LABEL =
+  /^(?:step|part|line|option|choice|case|figure|diagram|method|equation|statement|row|column|student)\s+\d{1,4}[.):]?$/i;
 
 /** Macros and their arguments removed, so `\cdot` doesn't read as a word. */
 function withoutMath(text: string): string {

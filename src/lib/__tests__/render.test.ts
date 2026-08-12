@@ -176,11 +176,24 @@ describe("structuralCheck agrees with the renderer", () => {
     expect(inlineShape("Step 1")).toBe("prose");
     expect(inlineShape("Option 2.")).toBe("prose");
     expect(inlineShape("Line 12)")).toBe("prose");
-    // Still expressions: the pattern only fires when there is nothing else.
+    // Still expressions: an identifier and its argument has the same shape as
+    // a label, so only the words that name a numbered thing count as one.
+    expect(inlineShape("sin 2")).toBe("math");
+    expect(inlineShape("log 2")).toBe("math");
+    expect(inlineShape("cos 30")).toBe("math");
+    expect(inlineShape("ln 4")).toBe("math");
     expect(inlineShape("x 2")).toBe("math");
     expect(inlineShape("2x + 1")).toBe("math");
     expect(inlineShape("\\log_2 8")).toBe("math");
     expect(inlineShape("Step 1: divide by \\(3\\)")).toBe("prose");
+  });
+
+  it("keeps an identifier and its argument in KaTeX", () => {
+    for (const expr of ["sin 2", "log 2", "cos 30", "ln 4"]) {
+      expect(rendered(renderInline(expr))).toBe(true);
+    }
+    // And the label it is shaped like still reads as words.
+    expect(rendered(renderInline("Step 1"))).toBe(false);
   });
 });
 
