@@ -376,6 +376,11 @@ export async function* buildProblemSet(
   // Templates are deterministic drills; they can't be aimed at a misconception
   // or at somebody's worksheet, so a bespoke set skips them for the same reason
   // it skips the pool.
+  // `chosen` is the running total, so the trace has to report the difference:
+  // `filled=3` on a build whose templates ran and contributed nothing reads as
+  // the opposite of what happened, and a phase trace nobody trusts is worse
+  // than none.
+  const beforeTemplates = chosen.length;
   const templateSlots = bespoke(config) ? 0 : count - chosen.length;
   if (templateSlots > 0) {
     const eligible = topics.flatMap((t) =>
@@ -412,7 +417,7 @@ export async function* buildProblemSet(
       yield tick();
     }
   }
-  mark("templates", `filled=${chosen.length}`);
+  mark("templates", `filled=${chosen.length - beforeTemplates}`);
 
   // --- 3. AI generation + verification ---
   // Stop starting new AI rounds once we're close to the route's maxDuration:
