@@ -1,8 +1,8 @@
 import { callStructured, CHECKER_MODELS } from "@/lib/ai/provider";
-import { EQUIVALENCE_SYSTEM_PROMPT, FEEDBACK_SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import { FEEDBACK_SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import { askModelIfEquivalent, notEquivalentWithoutAsking } from "@/lib/ai/equivalence";
 import {
   assertNeverFormat,
-  EquivalenceResultSchema,
   FeedbackResultSchema,
   type FeedbackResult,
   type ProblemAnswerRecord,
@@ -233,27 +233,6 @@ function submittedIds(submitted: unknown): string[] {
   return submitted
     .filter((x): x is string => typeof x === "string")
     .map((x) => x.trim().toUpperCase());
-}
-
-/** Stands in for the model call when the caller has no budget left for one. */
-async function notEquivalentWithoutAsking(): Promise<boolean> {
-  return false;
-}
-
-async function askModelIfEquivalent(
-  student: string,
-  reference: string,
-  acceptableForms: string[] = []
-): Promise<boolean> {
-  const result = await callStructured({
-    models: CHECKER_MODELS,
-    label: "equivalence",
-    system: EQUIVALENCE_SYSTEM_PROMPT,
-    prompt: `Reference answer (LaTeX): ${reference}${acceptableForms.length ? `\nAlso acceptable: ${acceptableForms.join(" ; ")}` : ""}\nStudent's answer: ${student}`,
-    schema: EquivalenceResultSchema,
-    maxOutputTokens: 2000,
-  });
-  return result?.equivalent ?? false;
 }
 
 /** Diagnose a wrong answer: what the student probably did wrong. */
