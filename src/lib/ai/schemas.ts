@@ -532,6 +532,32 @@ export const SolverResultSchema = z.object({
 });
 export type SolverResult = z.infer<typeof SolverResultSchema>;
 
+/**
+ * Several independent solves carried by one request.
+ *
+ * Verification was the larger half of a build's request count — one call per
+ * problem, so it scaled with the set no matter what authoring did — and the
+ * free tier meters requests rather than tokens.
+ *
+ * `problem_number` is what makes it safe, and it is not decoration. Pairing
+ * results to problems by array position would silently mis-pair the whole tail
+ * of a batch the moment a model returned four results for five problems, and
+ * the failure that produces is the worst kind available here: problem 5 judged
+ * against problem 4's solution, agreeing or disagreeing for reasons that have
+ * nothing to do with it. The model states which problem each result answers,
+ * and anything unclaimed is re-solved on its own.
+ */
+export const SolvedBatchSchema = z.object({
+  results: z.array(
+    SolverResultSchema.extend({
+      problem_number: z
+        .number()
+        .int()
+        .describe("The [n] label of the problem this result answers"),
+    })
+  ),
+});
+
 /** Repair pass output. */
 export const RepairResultSchema = z.object({
   diagnosis: z.string().describe("Who was right and why, briefly"),

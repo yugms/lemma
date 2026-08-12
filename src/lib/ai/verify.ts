@@ -1,11 +1,12 @@
 import katex from "katex";
-import { callStructured, CHECKER_MODELS } from "@/lib/ai/provider";
+import { callStructured, CHECKER_MODELS, SOLVES_PER_CALL } from "@/lib/ai/provider";
 import { SOLVER_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import {
   assertNeverFormat,
   assertNeverGraphResponse,
   GeneratedProblem,
   OpenAnswer,
+  SolvedBatchSchema,
   SolverResult,
   SolverResultSchema,
 } from "@/lib/ai/schemas";
@@ -244,8 +245,15 @@ export function structuralCheck(p: GeneratedProblem): { ok: boolean; reason?: st
   }
 }
 
-/** Independent solve with the cheap model. Statement only — no answer leakage. */
-export async function solveIndependently(p: GeneratedProblem): Promise<SolverResult | null> {
+/**
+ * Everything the solver is shown about one problem: the statement plus whatever
+ * its format needs to be answerable, and never the answer.
+ *
+ * Split out from `solveIndependently` so a batched solve shows each problem
+ * exactly what a solo solve would. Two ways of describing a problem to the
+ * checker would drift, and the one that drifted would be the one used least.
+ */
+function solverPrompt(p: GeneratedProblem): string {
   let statement = p.statement_latex;
   switch (p.format) {
     case "mcq":
@@ -309,14 +317,90 @@ export async function solveIndependently(p: GeneratedProblem): Promise<SolverRes
   if (p.style === "error_analysis") {
     statement += `\n\n(This problem quotes a worked solution that deliberately contains exactly one mistake and asks for it to be found. The mistake is the subject of the question, not a flaw in the problem: treat the problem as well-posed, and answer with the error and its correction.)`;
   }
+  return statement;
+}
+
+/** Independent solve with the cheap model. Statement only — no answer leakage. */
+export async function solveIndependently(p: GeneratedProblem): Promise<SolverResult | null> {
   return callStructured({
     models: CHECKER_MODELS,
     label: `solve:${p.format}`,
     system: SOLVER_SYSTEM_PROMPT,
-    prompt: statement,
+    prompt: solverPrompt(p),
     schema: SolverResultSchema,
     maxOutputTokens: 4000,
   });
+}
+
+/**
+ * Solve a set in one request instead of one per problem.
+ *
+ * Verification was the half of a build whose request count scaled with the set
+ * however cheap authoring got, and on a tier metered by requests that is what
+ * bounds how many sets a day exist. Each problem still gets its own reasoning
+ * and its own result; they share a request, not an answer.
+ *
+ * Kept deliberately small (`SOLVES_PER_CALL`) rather than one call per set. The
+ * checker is the quality gate the whole pipeline rests on, a long shared
+ * context is where a solver starts pattern-matching between problems instead of
+ * solving them, and one unusable response should not cost a whole set its
+ * verification.
+ *
+ * Returns one entry per problem, positionally — `null` where the batch did not
+ * come back with a result claiming that problem, which the caller re-solves on
+ * its own rather than treating as a disagreement.
+ */
+export async function solveBatch(
+  problems: GeneratedProblem[],
+  run: <T>(fn: () => Promise<T>) => Promise<T> = (fn) => fn()
+): Promise<(SolverResult | null)[]> {
+  // One problem is a solo solve; there is nothing to amortise and the batch
+  // schema only adds a field for the model to get wrong.
+  if (problems.length <= 1) {
+    return problems.length === 0 ? [] : [await run(() => solveIndependently(problems[0]))];
+  }
+
+  const out: (SolverResult | null)[] = new Array(problems.length).fill(null);
+  const chunks: { problem: GeneratedProblem; index: number }[][] = [];
+  for (let i = 0; i < problems.length; i += SOLVES_PER_CALL) {
+    chunks.push(
+      problems.slice(i, i + SOLVES_PER_CALL).map((problem, k) => ({ problem, index: i + k }))
+    );
+  }
+
+  await Promise.all(
+    chunks.map((chunk) =>
+      run(async () => {
+        if (chunk.length === 1) {
+          out[chunk[0].index] = await solveIndependently(chunk[0].problem);
+          return;
+        }
+        const batch = await callStructured({
+          models: CHECKER_MODELS,
+          label: `solve:batch:${chunk.length}`,
+          system: SOLVER_SYSTEM_PROMPT,
+          prompt: `Solve each of the ${chunk.length} problems below independently, as if you had been given it on its own. Return one entry in "results" for each, and set problem_number to the [n] label of the problem it answers.\n\n${chunk
+            .map((c, k) => `[${k + 1}] ${solverPrompt(c.problem)}`)
+            .join("\n\n---\n\n")}`,
+          schema: SolvedBatchSchema,
+          maxOutputTokens: 4000 * chunk.length,
+        });
+        if (!batch) return; // leaves nulls; the caller re-solves them individually
+
+        for (const r of batch.results) {
+          // The model chose this number, so it is input: an out-of-range or
+          // repeated one is dropped rather than trusted into another problem's
+          // slot. A dropped result costs one solo re-solve; a mis-paired one
+          // would judge a problem against somebody else's answer.
+          const slot = chunk[r.problem_number - 1];
+          if (!slot || out[slot.index] !== null) continue;
+          out[slot.index] = r;
+        }
+      })
+    )
+  );
+
+  return out;
 }
 
 /**
@@ -527,15 +611,23 @@ export async function solverGates(
   return null;
 }
 
-/** Full verification of one AI-generated problem. */
+/**
+ * Full verification of one AI-generated problem.
+ *
+ * `presolved` is this problem's share of a batched solve. Passing `null` — the
+ * batch came back without a result claiming it — falls through to a solo solve
+ * rather than counting as a disagreement, so a short or malformed batch costs
+ * requests, never problems.
+ */
 export async function verifyProblem(
   p: GeneratedProblem,
-  requestedDifficulty: number
+  requestedDifficulty: number,
+  presolved?: SolverResult | null
 ): Promise<VerificationOutcome> {
   const structural = structuralCheck(p);
   if (!structural.ok) return { ok: false, reason: structural.reason };
 
-  const solver = await solveIndependently(p);
+  const solver = presolved ?? (await solveIndependently(p));
   if (!solver) return { ok: false, reason: "solver call failed" };
   const reason = await solverGates(p, solver, requestedDifficulty);
   return reason ? { ok: false, reason, solver } : { ok: true, solver };
