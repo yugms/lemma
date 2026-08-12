@@ -169,6 +169,19 @@ describe("structuralCheck agrees with the renderer", () => {
     expect(inlineShape("the power rule")).toBe("prose");
     expect(inlineShape("   ")).toBe("empty");
   });
+
+  it("reads a word and a number as a label, not an expression", () => {
+    // Error-analysis choices name the step that went wrong; in math mode the
+    // space vanishes and the reader is offered `Step1`.
+    expect(inlineShape("Step 1")).toBe("prose");
+    expect(inlineShape("Option 2.")).toBe("prose");
+    expect(inlineShape("Line 12)")).toBe("prose");
+    // Still expressions: the pattern only fires when there is nothing else.
+    expect(inlineShape("x 2")).toBe("math");
+    expect(inlineShape("2x + 1")).toBe("math");
+    expect(inlineShape("\\log_2 8")).toBe("math");
+    expect(inlineShape("Step 1: divide by \\(3\\)")).toBe("prose");
+  });
 });
 
 describe("prepareProblem", () => {

@@ -125,6 +125,17 @@ const PROSE_RUN = /[A-Za-z]{2,}\s+[A-Za-z]{2,}/;
 /** Anything that could belong to an expression rather than a sentence. */
 const MATH_SIGNAL = /\\[a-zA-Z]+|[\\^_{}=+\-*/<>]|\d/;
 
+/**
+ * One word and a bare number and nothing else: "Step 1", "Option 2".
+ *
+ * The digit is a math signal and a single word is not a prose run, so these
+ * landed in math mode and KaTeX ate the space — an error-analysis problem
+ * whose choices name the steps rendered them as italic `Step1`…`Step4`. The
+ * pattern admits nothing an expression needs: any operator, macro, brace or
+ * second number fails it and the fragment stays math.
+ */
+const LABEL = /^[A-Za-z]{2,}\s+\d{1,4}[.):]?$/;
+
 /** Macros and their arguments removed, so `\cdot` doesn't read as a word. */
 function withoutMath(text: string): string {
   return text.replace(/\\[a-zA-Z]+/g, " ").replace(/\{[^{}]*\}/g, " ");
@@ -146,6 +157,7 @@ export function inlineShape(raw: string): "empty" | "prose" | "math" {
   if (/\\\(|\\\[|\{\{\d+\}\}/.test(text)) return "prose";
   // No math anywhere in it — a phrase like "the power rule".
   if (!MATH_SIGNAL.test(text)) return "prose";
+  if (LABEL.test(text)) return "prose";
   return PROSE_RUN.test(withoutMath(text)) ? "prose" : "math";
 }
 
