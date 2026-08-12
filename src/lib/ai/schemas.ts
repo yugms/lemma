@@ -334,12 +334,24 @@ export const ProblemBatchSchema = z.object({
 export type ProblemBatch = z.infer<typeof ProblemBatchSchema>;
 
 /**
- * Generation asks for one format at a time. A discriminated union survives the
- * round-trip through JSON Schema, but a flat single-shape schema is what models
- * follow most reliably — and a per-format request also lets the prompt speak
- * only about the format at hand. The batch and repair maps below hold that
- * per-kind mapping; both carry the same `satisfies Record<GenerationKind, …>`
- * guard, so a new kind without a schema is still a compile error.
+ * Two shapes for one job, because the binding constraint is requests per day.
+ *
+ * `MixedBatchSchema` asks for a whole set in one call. The free tier meters
+ * requests, not tokens, so a set that fans out one call per format spends its
+ * daily allowance on overhead: six problems across six formats used to be six
+ * calls of one problem each, since the count is split across kinds *before* it
+ * is chunked. Measured on a real build, 6 problems cost 12 requests.
+ *
+ * The per-kind maps below are still here and still used by repair, which fixes
+ * one known problem and therefore knows its kind. They also stay the safer
+ * choice for anything that needs the strict graph variants: the mixed union has
+ * to admit the permissive `GraphProblemSchema`, since a union discriminated on
+ * `format` can only hold one `graph` member. That costs nothing, because
+ * `structuralCheck` already rejects a graph problem whose `response_kind`
+ * disagrees with the field it filled, for free and before any model call.
+ *
+ * Both maps carry the same `satisfies Record<GenerationKind, …>` guard, so a new
+ * kind without a schema is still a compile error.
  */
 
 /**
@@ -353,6 +365,29 @@ const topicIndex = z
   .describe("0-based index of the topic this problem is for, from the numbered Topics list");
 
 export type TaggedProblem = GeneratedProblem & { topic_index: number };
+
+/**
+ * Every problem shape at once, tagged with its topic.
+ *
+ * `stamped()` cannot help here — it writes `format` from the request, and the
+ * whole point of this schema is that one request carries several. The model
+ * self-reports instead, which the discriminated union makes safe rather than
+ * merely hopeful: a problem whose `format` disagrees with its own shape fails
+ * to parse and is discarded, the same outcome as any other unusable output. It
+ * cannot arrive mislabelled and be believed.
+ */
+const TaggedProblemSchema = z.discriminatedUnion("format", [
+  McqProblemSchema.extend({ topic_index: topicIndex }),
+  OpenProblemSchema.extend({ topic_index: topicIndex }),
+  FillBlankProblemSchema.extend({ topic_index: topicIndex }),
+  MultiSelectProblemSchema.extend({ topic_index: topicIndex }),
+  OrderingProblemSchema.extend({ topic_index: topicIndex }),
+  MatchingProblemSchema.extend({ topic_index: topicIndex }),
+  MultiPartProblemSchema.extend({ topic_index: topicIndex }),
+  GraphProblemSchema.extend({ topic_index: topicIndex }),
+]);
+
+export const MixedBatchSchema = z.object({ problems: z.array(TaggedProblemSchema) });
 
 const BATCH_SCHEMA_BY_KIND = {
   mcq: z.object({ problems: z.array(McqProblemSchema.extend({ topic_index: topicIndex })) }),
