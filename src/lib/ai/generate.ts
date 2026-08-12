@@ -6,10 +6,10 @@ import {
 } from "@/lib/ai/provider";
 import { GENERATOR_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import {
-  batchSchemaFor,
   formatForKind,
   kindOf,
   kindsForFormat,
+  MixedBatchSchema,
   repairSchemaFor,
   type GeneratedProblem,
   type GenerationKind,
@@ -72,10 +72,10 @@ const FORMAT_BRIEF: Record<GenerationKind, string> = {
 
 function buildUserMessage(
   req: GenerationRequest,
-  kind: GenerationKind,
-  count: number,
+  mix: Map<GenerationKind, number>,
   avoid: string[]
 ): string {
+  const count = [...mix.values()].reduce((a, b) => a + b, 0);
   const topicLines = req.topics
     .map(
       (t, i) =>
@@ -136,9 +136,52 @@ bracketed number of the topic it actually tests):
 ${topicLines}
 
 Requirements:
-- Format: ${formatForKind(kind)} — ${FORMAT_BRIEF[kind]}
+- Formats — write exactly this many of each, and set each problem's \`format\`
+  field (and \`response_kind\`, on a graph problem) to match the shape you
+  actually wrote:
+${[...mix]
+  .map(
+    ([kind, n]) =>
+      `  - ${n} x ${formatForKind(kind)}${
+        kind.startsWith("graph_") ? ` (response_kind "${kind.slice(6)}")` : ""
+      } — ${FORMAT_BRIEF[kind]}`
+  )
+  .join("\n")}
 - Difficulty: ${req.difficulty} (per the rubric)
 - Allowed styles: ${req.styles.join(", ")} (distribute across them)${avoidBlock}${focusBlock}${materialBlock}`;
+}
+
+/**
+ * Pack the requested format mix into as few calls as possible.
+ *
+ * The old shape was one call per generation kind, which made the *number of
+ * formats* the thing that set the request count: a six-problem set across six
+ * formats went out as six calls authoring one problem each, and `MAX_PER_CALL`
+ * never bound because the split across kinds happened first. On a free tier
+ * metered by requests per day rather than tokens, that is the whole cost.
+ *
+ * Kinds are dealt round-robin so each call gets a spread of formats rather than
+ * one call being all the graphs — a batch the model plans as a whole is where
+ * the variety it was asked for actually comes from.
+ */
+function packIntoCalls(
+  plan: Map<GenerationKind, number>,
+  perCall: number
+): Map<GenerationKind, number>[] {
+  const units: GenerationKind[] = [];
+  for (const [kind, n] of plan) for (let i = 0; i < n; i++) units.push(kind);
+  if (units.length === 0) return [];
+
+  // Balanced, not greedy: taking `perCall` at a time leaves a remainder call
+  // authoring a single problem, and a call's cost is mostly fixed — the model
+  // plans the batch either way — so seven problems go out as 4+3, not 6+1.
+  const callCount = Math.ceil(units.length / perCall);
+  const calls: Map<GenerationKind, number>[] = Array.from({ length: callCount }, () => new Map());
+  units.forEach((kind, i) => {
+    const call = calls[i % callCount];
+    call.set(kind, (call.get(kind) ?? 0) + 1);
+  });
+  return calls;
 }
 
 /**
@@ -187,35 +230,30 @@ export async function generateProblems(
   req: GenerationRequest,
   { pool = (fn) => fn(), onBatch }: GenerationOptions = {}
 ): Promise<TaggedProblem[]> {
-  // One task per call rather than per kind. A kind wanting more than
-  // MAX_PER_CALL used to write its chunks back to back even though nothing but
-  // the avoid list ever linked them.
-  const tasks: { kind: GenerationKind; n: number }[] = [];
-  for (const [kind, wanted] of splitAcrossKinds(req.count, req.formats)) {
-    if (wanted <= 0) continue;
-    // Balanced, not greedy. Taking MAX_PER_CALL at a time leaves a remainder
-    // call authoring a single problem, and a call's cost is mostly fixed — the
-    // model plans the batch either way — so four problems go out as 2+2 rather
-    // than 3+1.
-    const chunks = Math.ceil(wanted / MAX_PER_CALL);
-    for (let i = 0; i < chunks; i++) {
-      tasks.push({ kind, n: Math.floor(wanted / chunks) + (i < wanted % chunks ? 1 : 0) });
-    }
-  }
+  // The desired mix is still worked out per kind — `graph` is three unrelated
+  // tasks and splitting before the division is what stops six graph problems
+  // being six of the same one — but it is then packed into as few calls as it
+  // fits in, rather than one call per kind.
+  const plan = new Map(
+    [...splitAcrossKinds(req.count, req.formats)].filter(([, wanted]) => wanted > 0)
+  );
+  const calls = packIntoCalls(plan, MAX_PER_CALL);
 
   const results: TaggedProblem[] = [];
   const seen = new Set(req.avoid.map(statementKey));
 
   const outcomes = await Promise.allSettled(
-    tasks.map(({ kind, n }) =>
+    calls.map((mix) =>
       pool(async () => {
         const batch = await callStructured({
           models: GENERATOR_MODELS,
-          label: `author:${kind}`,
+          // Names the formats in the call, so a trace still says what was being
+          // written when one of these is the slow or failing one.
+          label: `author:${[...mix.keys()].join("+")}`,
           system: GENERATOR_SYSTEM_PROMPT,
-          prompt: buildUserMessage(req, kind, n, req.avoid),
-          schema: batchSchemaFor(kind),
-          maxOutputTokens: 30000,
+          prompt: buildUserMessage(req, mix, req.avoid),
+          schema: MixedBatchSchema,
+          maxOutputTokens: 40000,
           thinking: "medium",
           budgetMs: 150_000, // authoring a batch is the longest call we make
         });

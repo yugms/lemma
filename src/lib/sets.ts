@@ -11,10 +11,11 @@ import {
   type ProblemFormat,
   type ProblemStyle,
   type SanitizedProblem,
+  type SolverResult,
   type TaggedProblem,
 } from "@/lib/ai/schemas";
 import { generateProblems, repairProblem, type TopicInfo } from "@/lib/ai/generate";
-import { solveIndependently, solverGates, verifyProblem } from "@/lib/ai/verify";
+import { solveBatch, solveIndependently, solverGates, verifyProblem } from "@/lib/ai/verify";
 import { AI_CONCURRENCY, createCallPool } from "@/lib/ai/provider";
 import { asyncQueue } from "@/lib/async-queue";
 import { instantiate, templatesFor } from "@/lib/templates";
@@ -154,10 +155,11 @@ export type VerifiedProblem = { problem: TaggedProblem; verification: unknown };
  */
 export async function verifyOrRepair(
   p: TaggedProblem,
-  difficulty: number
+  difficulty: number,
+  presolved?: SolverResult | null
 ): Promise<VerifiedProblem | null> {
   try {
-    return await runChecks(p, difficulty);
+    return await runChecks(p, difficulty, presolved);
   } catch {
     return null;
   }
@@ -165,9 +167,10 @@ export async function verifyOrRepair(
 
 async function runChecks(
   p: TaggedProblem,
-  difficulty: number
+  difficulty: number,
+  presolved?: SolverResult | null
 ): Promise<VerifiedProblem | null> {
-  const outcome = await verifyProblem(p, difficulty);
+  const outcome = await verifyProblem(p, difficulty, presolved);
   if (outcome.ok) {
     return {
       problem: p,
@@ -470,22 +473,35 @@ export async function* buildProblemSet(
                 });
               }
               authored += batch.length;
-              for (const p of batch) {
-                checks.push(
-                  pool(() => verifyOrRepair(p, config.difficulty)).then((result) => {
-                    if (!result) return;
-                    verified.push(result);
-                    // Counts what has passed, not what is finally stored. The
-                    // meter's job is to show the build moving, and it otherwise
-                    // reads zero for the whole of the longest phase.
-                    events.push({
-                      type: "progress",
-                      done: Math.min(count, done + verified.length),
-                      total: count,
-                    });
-                  })
-                );
-              }
+              // Solve the batch in one request, then judge each problem against
+              // its own result. The outer function deliberately does not hold a
+              // pool slot: it awaits work that needs slots, and holding one
+              // while doing so is how a bounded pool deadlocks.
+              checks.push(
+                (async () => {
+                  const solved = await solveBatch(batch, pool).catch(() =>
+                    batch.map(() => null)
+                  );
+                  await Promise.all(
+                    batch.map((p, i) =>
+                      pool(() => verifyOrRepair(p, config.difficulty, solved[i])).then(
+                        (result) => {
+                          if (!result) return;
+                          verified.push(result);
+                          // Counts what has passed, not what is finally stored.
+                          // The meter's job is to show the build moving, and it
+                          // otherwise reads zero for the whole of the longest phase.
+                          events.push({
+                            type: "progress",
+                            done: Math.min(count, done + verified.length),
+                            total: count,
+                          });
+                        }
+                      )
+                    )
+                  );
+                })()
+              );
             },
           }
         );

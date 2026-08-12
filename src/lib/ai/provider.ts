@@ -77,6 +77,18 @@ export const CHECKER_MODELS = modelList(process.env.GEMINI_CHECKER_MODELS, [
 export const AI_CONCURRENCY = positiveInt(process.env.GEMINI_CONCURRENCY, 6);
 
 /**
+ * Problems solved by one verification call — the other half of the request
+ * budget, and the half that used to scale with the set no matter what.
+ *
+ * Small on purpose, and not for the same reason `PROBLEMS_PER_CALL` is large.
+ * The independent solve is the quality gate the whole pipeline rests on: a long
+ * shared context is where a solver starts pattern-matching across problems
+ * rather than solving each one, and one unusable response should cost a few
+ * re-solves rather than a set's whole verification.
+ */
+export const SOLVES_PER_CALL = positiveInt(process.env.GEMINI_SOLVES_PER_CALL, 5);
+
+/**
  * Problems asked for in one authoring call — the other half of the same
  * throughput dial, which is why it lives here rather than next to its caller.
  *

@@ -334,12 +334,24 @@ export const ProblemBatchSchema = z.object({
 export type ProblemBatch = z.infer<typeof ProblemBatchSchema>;
 
 /**
- * Generation asks for one format at a time. A discriminated union survives the
- * round-trip through JSON Schema, but a flat single-shape schema is what models
- * follow most reliably — and a per-format request also lets the prompt speak
- * only about the format at hand. The batch and repair maps below hold that
- * per-kind mapping; both carry the same `satisfies Record<GenerationKind, …>`
- * guard, so a new kind without a schema is still a compile error.
+ * Two shapes for one job, because the binding constraint is requests per day.
+ *
+ * `MixedBatchSchema` asks for a whole set in one call. The free tier meters
+ * requests, not tokens, so a set that fans out one call per format spends its
+ * daily allowance on overhead: six problems across six formats used to be six
+ * calls of one problem each, since the count is split across kinds *before* it
+ * is chunked. Measured on a real build, 6 problems cost 12 requests.
+ *
+ * The per-kind maps below are still here and still used by repair, which fixes
+ * one known problem and therefore knows its kind. They also stay the safer
+ * choice for anything that needs the strict graph variants: the mixed union has
+ * to admit the permissive `GraphProblemSchema`, since a union discriminated on
+ * `format` can only hold one `graph` member. That costs nothing, because
+ * `structuralCheck` already rejects a graph problem whose `response_kind`
+ * disagrees with the field it filled, for free and before any model call.
+ *
+ * Both maps carry the same `satisfies Record<GenerationKind, …>` guard, so a new
+ * kind without a schema is still a compile error.
  */
 
 /**
@@ -353,6 +365,29 @@ const topicIndex = z
   .describe("0-based index of the topic this problem is for, from the numbered Topics list");
 
 export type TaggedProblem = GeneratedProblem & { topic_index: number };
+
+/**
+ * Every problem shape at once, tagged with its topic.
+ *
+ * `stamped()` cannot help here — it writes `format` from the request, and the
+ * whole point of this schema is that one request carries several. The model
+ * self-reports instead, which the discriminated union makes safe rather than
+ * merely hopeful: a problem whose `format` disagrees with its own shape fails
+ * to parse and is discarded, the same outcome as any other unusable output. It
+ * cannot arrive mislabelled and be believed.
+ */
+const TaggedProblemSchema = z.discriminatedUnion("format", [
+  McqProblemSchema.extend({ topic_index: topicIndex }),
+  OpenProblemSchema.extend({ topic_index: topicIndex }),
+  FillBlankProblemSchema.extend({ topic_index: topicIndex }),
+  MultiSelectProblemSchema.extend({ topic_index: topicIndex }),
+  OrderingProblemSchema.extend({ topic_index: topicIndex }),
+  MatchingProblemSchema.extend({ topic_index: topicIndex }),
+  MultiPartProblemSchema.extend({ topic_index: topicIndex }),
+  GraphProblemSchema.extend({ topic_index: topicIndex }),
+]);
+
+export const MixedBatchSchema = z.object({ problems: z.array(TaggedProblemSchema) });
 
 const BATCH_SCHEMA_BY_KIND = {
   mcq: z.object({ problems: z.array(McqProblemSchema.extend({ topic_index: topicIndex })) }),
@@ -496,6 +531,32 @@ export const SolverResultSchema = z.object({
   difficulty_estimate: z.number().describe("Your 1-5 difficulty rating per the rubric"),
 });
 export type SolverResult = z.infer<typeof SolverResultSchema>;
+
+/**
+ * Several independent solves carried by one request.
+ *
+ * Verification was the larger half of a build's request count — one call per
+ * problem, so it scaled with the set no matter what authoring did — and the
+ * free tier meters requests rather than tokens.
+ *
+ * `problem_number` is what makes it safe, and it is not decoration. Pairing
+ * results to problems by array position would silently mis-pair the whole tail
+ * of a batch the moment a model returned four results for five problems, and
+ * the failure that produces is the worst kind available here: problem 5 judged
+ * against problem 4's solution, agreeing or disagreeing for reasons that have
+ * nothing to do with it. The model states which problem each result answers,
+ * and anything unclaimed is re-solved on its own.
+ */
+export const SolvedBatchSchema = z.object({
+  results: z.array(
+    SolverResultSchema.extend({
+      problem_number: z
+        .number()
+        .int()
+        .describe("The [n] label of the problem this result answers"),
+    })
+  ),
+});
 
 /** Repair pass output. */
 export const RepairResultSchema = z.object({

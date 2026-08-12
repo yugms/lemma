@@ -67,13 +67,42 @@ describe("generateProblems fan-out", () => {
     expect(asked.reduce((a, b) => a + b, 0)).toBe(PER_CALL + 1);
   });
 
-  it("expands graph into its three kinds and labels each call", async () => {
-    call.mockImplementation(async () => uniqueBatch(1));
+  it("still expands graph into its three kinds, but asks for them in one call", async () => {
+    call.mockImplementation(async () => uniqueBatch(3));
 
     await generateProblems(request({ count: 3, formats: ["graph"] }));
 
-    const labels = call.mock.calls.map((c) => c[0].label).sort();
-    expect(labels).toEqual(["author:graph_points", "author:graph_sketch", "author:graph_value"]);
+    // The mix is still per-kind — three graph problems must not be three of the
+    // same one — but it costs a single request rather than three.
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0][0].label).toBe("author:graph_value+graph_points+graph_sketch");
+    const prompt = call.mock.calls[0][0].prompt as string;
+    for (const kind of ["value", "points", "sketch"]) {
+      expect(prompt).toContain(`response_kind "${kind}"`);
+    }
+  });
+
+  // The regression this guards is the one that made the free tier's daily
+  // request cap bind: the count was split across kinds *before* it was chunked,
+  // so the number of formats set the number of calls and each one authored a
+  // single problem. Six problems across every format cost six requests.
+  it("does not let the number of formats decide the number of calls", async () => {
+    call.mockImplementation(async () => uniqueBatch(6));
+
+    await generateProblems(
+      request({
+        count: 6,
+        formats: ["mcq", "open", "fill_blank", "multi_select", "ordering", "matching"],
+      })
+    );
+
+    expect(call).toHaveBeenCalledTimes(1);
+    const prompt = call.mock.calls[0][0].prompt as string;
+    expect(prompt).toMatch(/Author 6 new problems/);
+    // Every requested format is still named, with its own count.
+    for (const f of ["multiple choice", "open answer", "fill in the blank"]) {
+      expect(prompt).toContain(f);
+    }
   });
 
   it("runs the calls concurrently rather than one after another", async () => {

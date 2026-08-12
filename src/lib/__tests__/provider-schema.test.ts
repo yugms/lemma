@@ -4,6 +4,7 @@ import {
   batchSchemaFor,
   repairSchemaFor,
   GENERATION_KINDS,
+  MixedBatchSchema,
   SolverResultSchema,
   FeedbackResultSchema,
   EquivalenceResultSchema,
@@ -22,6 +23,9 @@ describe("model JSON schemas", () => {
     // separate schemas and each one is sent to a model on its own.
     ...GENERATION_KINDS.map((k) => [`batch:${k}`, batchSchemaFor(k)] as const),
     ...GENERATION_KINDS.map((k) => [`repair:${k}`, repairSchemaFor(k)] as const),
+    // The mixed-format batch is a discriminated union of every shape, which is
+    // exactly where zod would reach for `$ref` if it were going to.
+    ["mixed-batch", MixedBatchSchema] as const,
     ["solver", SolverResultSchema] as const,
     ["feedback", FeedbackResultSchema] as const,
     ["equivalence", EquivalenceResultSchema] as const,
