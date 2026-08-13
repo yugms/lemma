@@ -154,8 +154,8 @@ describe("client bundle", () => {
   it("still allows the lazy escape hatch", () => {
     // The rule is about *static* imports. If this ever fails, the walker has
     // started counting `await import()` and the assertions above are wrong.
-    const builder = readFileSync(join(SRC, "components/builder/builder-form.tsx"), "utf8");
-    expect(builder).toContain('await import("@/lib/auth")');
-    expect(valueImports(builder)).not.toContain("@/lib/auth");
+    const buildRun = readFileSync(join(SRC, "components/build-run.tsx"), "utf8");
+    expect(buildRun).toContain('await import("@/lib/auth")');
+    expect(valueImports(buildRun)).not.toContain("@/lib/auth");
   });
 });

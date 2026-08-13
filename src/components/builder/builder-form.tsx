@@ -1,11 +1,10 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { ChevronDown, Loader2, Minus, Plus, Sparkles, X, Zap } from "lucide-react";
+import { BuildStatus, useBuildRun } from "@/components/build-run";
 import type { CatalogCourse } from "@/lib/catalog";
-import { streamBuild } from "@/lib/build-stream";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 // From `kinds` rather than `schemas`: the vocabulary is the same, but importing
 // a value from `schemas` puts the whole zod runtime in this route's bundle.
@@ -38,8 +37,6 @@ const FORMAT_HINTS: Record<ProblemFormat, string> = {
 
 const MAX_TOPICS = 6;
 
-type Progress = { done: number; total: number; message: string };
-
 /** One labelled row of the spec sheet. Label left, controls right. */
 function Row({
   label,
@@ -69,7 +66,6 @@ function Row({
 }
 
 export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
-  const router = useRouter();
   /* Which course is being browsed — not a property of the set. A set is just a
      list of topic ids, and the pipeline labels each one with its own course
      when it prompts the author, so a set may span as many as it likes. */
@@ -80,8 +76,7 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
   const [difficulty, setDifficulty] = useState(2);
   const [styles, setStyles] = useState<ProblemStyle[]>(["drill"]);
   const [formats, setFormats] = useState<ProblemFormat[]>(["mcq", "open"]);
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { progress, error, busy, run } = useBuildRun();
 
   const course = useMemo(() => catalog.find((c) => c.id === courseId), [catalog, courseId]);
   const visibleUnits = useMemo(
@@ -138,41 +133,9 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
     );
   };
 
-  const busy = progress !== null;
   const canSubmit = topicIds.length > 0 && styles.length > 0 && formats.length > 0 && !busy;
 
-  async function submit() {
-    setError(null);
-    setProgress({ done: 0, total: count, message: "Starting…" });
-    try {
-      // Loaded on submit, not on mount — the Supabase SDK is the heaviest
-      // dependency on this page and nothing needs it until you generate.
-      const { ensureUser } = await import("@/lib/auth");
-      await ensureUser();
-      // That may have just minted an anonymous session. Auth is resolved on the
-      // server and handed to the header as a prop, so without this the header
-      // keeps offering "Sign in" to someone who now has a session and a set.
-      router.refresh();
-      for await (const event of streamBuild({ topicIds, count, difficulty, styles, formats })) {
-        if (event.type === "status") {
-          setProgress((p) => ({ ...(p ?? { done: 0, total: count }), message: event.message }));
-        } else if (event.type === "progress") {
-          setProgress((p) => ({ message: p?.message ?? "", done: event.done, total: event.total }));
-        } else if (event.type === "complete") {
-          // Progress is deliberately left set so the controls stay locked
-          // through the navigation.
-          router.push(`/set/${event.setId}`);
-          return;
-        } else if (event.type === "error") {
-          throw new Error(event.message);
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-      setProgress(null);
-    }
-  }
-
+  const submit = () => run({ topicIds, count, difficulty, styles, formats }, count);
 
   return (
     <div className="border-t border-line">
@@ -428,41 +391,7 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
           </p>
         )}
 
-        {progress && (
-          <div className="space-y-3">
-            <div className="flex items-baseline justify-between gap-4">
-              <span aria-live="polite" className="text-sm text-muted">
-                {progress.message}
-              </span>
-              <span className="mono-meta">
-                {progress.done}/{progress.total}
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={progress.total}
-              aria-valuenow={progress.done}
-              aria-label="Generation progress"
-              className="meter meter-live"
-            >
-              <div
-                className="meter-fill"
-                // Floored so the bar is never invisible while work is real.
-                style={{ width: `${Math.max(3, (progress.done / progress.total) * 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <p
-            role="alert"
-            className="aside-rule border-bad py-1 text-sm leading-relaxed text-bad"
-          >
-            {error}
-          </p>
-        )}
+        <BuildStatus progress={progress} error={error} />
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           <button

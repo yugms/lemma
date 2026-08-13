@@ -234,7 +234,7 @@ export function ScanWorkspace({
       )}
 
       {error && (
-        <p role="alert" className="aside-rule border-bad py-1 text-sm leading-relaxed text-bad">
+        <p role="alert" className="aside-rule-bad">
           {error}
         </p>
       )}

@@ -74,7 +74,7 @@ export default async function PrintPage({
           </Link>
         </div>
         {wantsKey && (
-          <p className="aside-rule border-bad mt-7 py-1 text-sm text-bad">
+          <p className="aside-rule-bad mt-7">
             The answer key prints on its own page at the end. On screen it
             follows the questions — fold it away if you are working from this.
             Don&apos;t hand this copy out.

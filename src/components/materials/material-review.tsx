@@ -1,9 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Minus, Plus, Sparkles } from "lucide-react";
-import { streamBuild } from "@/lib/build-stream";
+import { BuildStatus, useBuildRun } from "@/components/build-run";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 import {
   PROBLEM_FORMATS,
@@ -27,8 +26,6 @@ export type MaterialReviewProps = {
   /** What the note asked for, already reduced to a direction by the analysis. */
   shift: "easier" | "same" | "harder";
 };
-
-type Progress = { message: string; done: number; total: number };
 
 /** Where the requested shift lands, clamped to the levels that exist. */
 const shifted = (level: number, shift: MaterialReviewProps["shift"]) =>
@@ -55,7 +52,6 @@ export function MaterialReview({
   formats: detectedFormats,
   shift,
 }: MaterialReviewProps) {
-  const router = useRouter();
   // Seeded in the initializer rather than an effect — `react-hooks/set-state-in-effect`
   // rejects the other shape, and this genuinely is initial state, not a reaction.
   const [topicIds, setTopicIds] = useState<string[]>(() => topics.map((t) => t.id));
@@ -63,10 +59,8 @@ export function MaterialReview({
   const [level, setLevel] = useState(() => shifted(difficulty, shift));
   const [styles, setStyles] = useState<ProblemStyle[]>(() => detectedStyles);
   const [formats, setFormats] = useState<ProblemFormat[]>(() => detectedFormats);
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { progress, error, busy, run } = useBuildRun();
 
-  const busy = progress !== null;
   const canSubmit = topicIds.length > 0 && styles.length > 0 && formats.length > 0 && !busy;
 
   const levelNote = useMemo(() => {
@@ -79,42 +73,11 @@ export function MaterialReview({
     if (next.length > 0) set(next);
   }
 
-  async function submit() {
-    setError(null);
-    setProgress({ done: 0, total: count, message: "Starting…" });
-    try {
-      const { ensureUser } = await import("@/lib/auth");
-      await ensureUser();
-      router.refresh();
-      for await (const event of streamBuild({
-        mode: "material",
-        materialId,
-        topicIds,
-        count,
-        difficulty: level,
-        styles,
-        formats,
-      })) {
-        if (event.type === "status") {
-          setProgress((p) => ({ ...(p ?? { done: 0, total: count }), message: event.message }));
-        } else if (event.type === "progress") {
-          setProgress((p) => ({
-            message: p?.message ?? "",
-            done: event.done,
-            total: event.total,
-          }));
-        } else if (event.type === "complete") {
-          router.push(`/set/${event.setId}`);
-          return;
-        } else if (event.type === "error") {
-          throw new Error(event.message);
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-      setProgress(null);
-    }
-  }
+  const submit = () =>
+    run(
+      { mode: "material", materialId, topicIds, count, difficulty: level, styles, formats },
+      count
+    );
 
   return (
     <div className="space-y-9">
@@ -231,37 +194,7 @@ export function MaterialReview({
         </div>
       </section>
 
-      {progress && (
-        <div className="space-y-3">
-          <div className="flex items-baseline justify-between gap-4">
-            <span aria-live="polite" className="text-sm text-muted">
-              {progress.message}
-            </span>
-            <span className="mono-meta">
-              {progress.done}/{progress.total}
-            </span>
-          </div>
-          <div
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={progress.total}
-            aria-valuenow={progress.done}
-            aria-label="Generation progress"
-            className="meter meter-live"
-          >
-            <div
-              className="meter-fill"
-              style={{ width: `${Math.max(3, (progress.done / progress.total) * 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {error && (
-        <p role="alert" className="aside-rule border-bad py-1 text-sm leading-relaxed text-bad">
-          {error}
-        </p>
-      )}
+      <BuildStatus progress={progress} error={error} />
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         <button

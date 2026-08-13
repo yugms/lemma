@@ -1,13 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Sparkles } from "lucide-react";
-import { streamBuild } from "@/lib/build-stream";
+import { BuildStatus, useBuildRun } from "@/components/build-run";
 import type { PrescriptionView } from "@/lib/coach-plan";
 import type { StatsScope } from "@/lib/analytics";
-
-type Progress = { done: number; total: number; message: string };
 
 /**
  * One coach-designed set, built on click.
@@ -24,37 +20,14 @@ export function PrescriptionCard({
   plan: PrescriptionView;
   scope: StatsScope;
 }) {
-  const router = useRouter();
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const busy = progress !== null;
+  const { progress, error, busy, run } = useBuildRun();
 
-  async function build() {
-    setError(null);
-    setProgress({ done: 0, total: plan.count, message: "Reading your practice history…" });
-    try {
-      // Same lazy import as the builder — the Supabase SDK stays off this route
-      // until someone actually generates.
-      const { ensureUser } = await import("@/lib/auth");
-      await ensureUser();
-      for await (const event of streamBuild({ mode: "targeted", plan: plan.id, scope })) {
-        if (event.type === "status") {
-          setProgress((p) => ({ ...(p ?? { done: 0, total: plan.count }), message: event.message }));
-        } else if (event.type === "progress") {
-          setProgress((p) => ({ message: p?.message ?? "", done: event.done, total: event.total }));
-        } else if (event.type === "complete") {
-          // Left set on purpose so the button stays locked through navigation.
-          router.push(`/set/${event.setId}`);
-          return;
-        } else if (event.type === "error") {
-          throw new Error(event.message);
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-      setProgress(null);
-    }
-  }
+  const build = () =>
+    run(
+      { mode: "targeted", plan: plan.id, scope },
+      plan.count,
+      "Reading your practice history…"
+    );
 
   return (
     <li className="panel flex h-full flex-col justify-between gap-6 p-5">
@@ -74,37 +47,7 @@ export function PrescriptionCard({
       </div>
 
       <div className="space-y-3">
-        {progress && (
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <span aria-live="polite" className="text-[13px] text-muted">
-                {progress.message}
-              </span>
-              <span className="mono-meta">
-                {progress.done}/{progress.total}
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={progress.total}
-              aria-valuenow={progress.done}
-              aria-label="Generation progress"
-              className="meter meter-live"
-            >
-              <div
-                className="meter-fill"
-                style={{ width: `${Math.max(3, (progress.done / progress.total) * 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <p role="alert" className="aside-rule border-bad py-1 text-[13px] leading-relaxed text-bad">
-            {error}
-          </p>
-        )}
+        <BuildStatus progress={progress} error={error} />
 
         <button type="button" disabled={busy} onClick={build} className="btn btn-accent w-full">
           {busy ? (

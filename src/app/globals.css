@@ -567,6 +567,17 @@
   .aside-rule-accent {
     border-left-color: var(--accent);
   }
+  /* The "that didn't work" paragraph, which every form in the app renders.
+     It was written out as a utility stack seven times, in four variants that
+     differed only by accident — a stray text size, leading on five of them. */
+  .aside-rule-bad {
+    border-left: 2px solid var(--bad);
+    padding-left: 1rem;
+    padding-block: 0.25rem;
+    font-size: 0.875rem;
+    line-height: 1.625;
+    color: var(--bad);
+  }
 
   .badge {
     display: inline-flex;
