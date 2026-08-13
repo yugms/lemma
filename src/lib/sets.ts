@@ -401,11 +401,13 @@ export async function* buildProblemSet(
       yield { type: "status", message: "Generating drill problems..." };
       // Use templates for at most half the remaining slots when AI styles/formats
       // are also requested, else fill everything.
-      const aiPossible =
-        config.styles.some((s) => s !== "drill") || eligible.length === 0;
-      const fillTarget = aiPossible
-        ? Math.ceil(templateSlots / 2)
-        : templateSlots;
+      //
+      // Rounding down is what makes that "at most". Rounding up gave templates
+      // the last slot whenever an odd number was left, so a student who asked
+      // for word problems and whose pool filled five of six got a sixth drill
+      // and no AI problem at all.
+      const aiPossible = config.styles.some((s) => s !== "drill");
+      const fillTarget = aiPossible ? Math.floor(templateSlots / 2) : templateSlots;
       const rows: NewProblemRow[] = [];
       for (let i = 0; i < fillTarget; i++) {
         const pick = eligible[i % eligible.length];
