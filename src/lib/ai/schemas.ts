@@ -62,7 +62,6 @@ export type ChoiceId = (typeof CHOICE_IDS)[number];
  * solver to disagree about which side a bare "C" refers to.
  */
 const MATCH_TARGET_IDS = ["1", "2", "3", "4", "5", "6", "7"] as const;
-export type MatchTargetId = (typeof MATCH_TARGET_IDS)[number];
 
 export const OpenAnswerSchema = z.object({
   value_latex: z
@@ -326,12 +325,6 @@ export const GeneratedProblemSchema = z.discriminatedUnion("format", [
   GraphProblemSchema,
 ]);
 export type GeneratedProblem = z.infer<typeof GeneratedProblemSchema>;
-export type GraphProblem = z.infer<typeof GraphProblemSchema>;
-
-export const ProblemBatchSchema = z.object({
-  problems: z.array(GeneratedProblemSchema),
-});
-export type ProblemBatch = z.infer<typeof ProblemBatchSchema>;
 
 /**
  * Two shapes for one job, because the binding constraint is requests per day.
@@ -556,12 +549,6 @@ export const SolvedBatchSchema = z.object({
         .describe("The [n] label of the problem this result answers"),
     })
   ),
-});
-
-/** Repair pass output. */
-export const RepairResultSchema = z.object({
-  diagnosis: z.string().describe("Who was right and why, briefly"),
-  fixed_problem: GeneratedProblemSchema,
 });
 
 /** Answer-equivalence check output. */
