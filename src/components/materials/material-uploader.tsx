@@ -86,6 +86,19 @@ export function MaterialUploader() {
         body: JSON.stringify({ paths, text: text.trim(), want: want.trim() }),
       });
       const json = await res.json();
+      /**
+       * A rejection is still a material, and it is the one case where the
+       * server hands back an id alongside the error. The stored row explains
+       * itself on its own page — our copy, keyed off the closed verdict — and
+       * without this the row was written, listed nowhere (the index shows only
+       * `ready`), and reachable only by typing the URL.
+       *
+       * Every other failure has no id to go to and stays on the form.
+       */
+      if (res.status === 422 && json.materialId) {
+        router.push(`/materials/${json.materialId}`);
+        return;
+      }
       if (!res.ok) throw new Error(json.error ?? "Couldn't read that one.");
 
       router.push(`/materials/${json.materialId}`);
