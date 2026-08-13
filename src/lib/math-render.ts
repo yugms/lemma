@@ -131,7 +131,7 @@ const MATH_SIGNAL = /\\[a-zA-Z]+|[\\^_{}=+\-*/<>]|\d/;
  * reason a fragment shaped like a label is not one.
  */
 const MATH_WORD =
-  /^(?:sin|cos|tan|sec|csc|cot|sinh|cosh|tanh|arcsin|arccos|arctan|ln|log|lg|exp|lim|max|min|det|dim|deg|gcd|lcm|mod|arg)$/i;
+  /^(?:sin|cos|tan|sec|csc|cot|sinh|cosh|tanh|arcsin|arccos|arctan|ln|log|lg|exp|sqrt|lim|max|min|det|dim|deg|gcd|lcm|mod|arg)$/i;
 
 /** Words, numbers and sentence punctuation — no operator, macro or brace. */
 const LABEL_CHARS = /^[A-Za-z0-9 ,.:;'()-]+$/;

@@ -211,7 +211,7 @@ describe("structuralCheck agrees with the renderer", () => {
   it("leaves an identifier and its argument as an expression", () => {
     // The same shape as a label, and the reason the naming word cannot be the
     // test: the nouns are open-ended, these are not.
-    for (const expr of ["sin 2", "log 2", "cos 30", "ln 4", "max 5", "\\sin 2"]) {
+    for (const expr of ["sin 2", "log 2", "cos 30", "ln 4", "max 5", "sqrt 2", "\\sin 2"]) {
       expect(inlineShape(expr)).toBe("math");
       expect(rendered(renderInline(expr))).toBe(true);
     }
