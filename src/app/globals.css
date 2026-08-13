@@ -35,7 +35,6 @@
   --on-solid: #faf7f0;
 
   --accent: #7a1f2b;
-  --accent-hover: #94263a;
   --accent-solid: #7a1f2b;
   --accent-on: #fdf6f2;
   --accent-line: #dcc0bd;
@@ -76,7 +75,6 @@
     --on-solid: #0e0c0a;
 
     --accent: #e4808c;
-    --accent-hover: #f09aa4;
     --accent-solid: #a32a3c;
     --accent-on: #fff2f1;
     --accent-line: #5c2730;
@@ -117,7 +115,6 @@
   --on-solid: #0e0c0a;
 
   --accent: #e4808c;
-  --accent-hover: #f09aa4;
   --accent-solid: #a32a3c;
   --accent-on: #fff2f1;
   --accent-line: #5c2730;
@@ -139,7 +136,6 @@
 @theme inline {
   --color-paper: var(--paper);
   --color-surface: var(--surface);
-  --color-raised: var(--raised);
   --color-sunk: var(--sunk);
 
   --color-fg: var(--fg);
@@ -150,8 +146,6 @@
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
 
-  --color-solid: var(--solid);
-  --color-on-solid: var(--on-solid);
 
   --color-accent: var(--accent);
   --color-accent-solid: var(--accent-solid);
@@ -160,11 +154,9 @@
   --color-accent-wash: var(--accent-wash);
 
   --color-ok: var(--ok);
-  --color-ok-line: var(--ok-line);
   --color-ok-wash: var(--ok-wash);
 
   --color-bad: var(--bad);
-  --color-bad-line: var(--bad-line);
   --color-bad-wash: var(--bad-wash);
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
@@ -367,19 +359,6 @@
     box-shadow:
       0 1px 2px rgb(var(--shadow-color) / 0.04),
       0 8px 24px -12px rgb(var(--shadow-color) / 0.1);
-  }
-
-  /* Hairline that fades at both ends — softer than a full-bleed rule. */
-  .rule-fade {
-    height: 1px;
-    border: 0;
-    background: linear-gradient(
-      to right,
-      transparent,
-      var(--line) 8%,
-      var(--line) 92%,
-      transparent
-    );
   }
 
   /* ── Buttons ──────────────────────────────────────────────────── */
@@ -753,9 +732,6 @@
   .enter-rise {
     animation: rise-in 0.42s var(--ease-out-expo) both;
   }
-  .enter-fade {
-    animation: fade-in 0.3s ease-out both;
-  }
 
   .stamp {
     animation: stamp-in 0.44s var(--ease-spring) both;
@@ -799,15 +775,6 @@
   to {
     opacity: 1;
     transform: none;
-  }
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
   }
 }
 
@@ -1070,7 +1037,6 @@
     --on-solid: #ffffff;
 
     --accent: #000000;
-    --accent-hover: #000000;
     --accent-solid: #000000;
     --accent-on: #ffffff;
     --accent-line: #bbbbbb;
