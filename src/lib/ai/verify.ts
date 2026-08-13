@@ -448,6 +448,31 @@ export async function solverAgrees(
     }
   };
 
+  /**
+   * One written answer against the author's, in three steps whose order is the
+   * substance: local comparison settles most of it for free; an unsimplified
+   * but numerically right answer is reconciled before it can fail; and only a
+   * prose answer — the case local comparison can never do better than
+   * "uncertain" on — costs a model call.
+   *
+   * `open`, `multi_part` and `graph`/`value` each wrote this out, and each
+   * wrote a slightly different one. `givenNumeric` is the solver's own parse
+   * where it reported one, which is more trustworthy than re-parsing its LaTeX.
+   */
+  const answerAgrees = async (
+    given: string,
+    a: OpenAnswer,
+    givenNumeric: number | null = null
+  ): Promise<boolean> => {
+    const res = a.multi_valued ? checkMultiAnswer(given, a) : checkOpenAnswer(given, a);
+    if (res === "correct") return true;
+    const sn = givenNumeric ?? parseNumeric(normalizeMath(given));
+    const tn = a.numeric_value ?? parseNumeric(normalizeMath(a.value_latex));
+    if (sn !== null && tn !== null) return numbersEqual(sn, tn, a.tolerance);
+    if (res === "incorrect") return false;
+    return meansTheSame(given, a);
+  };
+
   if (p.format === "mcq") {
     return (
       s.chosen_choice_id?.trim().toUpperCase() === p.correct_choice_id ||
@@ -465,26 +490,7 @@ export async function solverAgrees(
     return letters(s.chosen_order).join() === p.correct_order.join();
   }
   if (p.format === "open") {
-    const a = p.answer;
-    if (a.kind === "numeric" && a.numeric_value !== null && s.final_answer_numeric !== null) {
-      return numbersEqual(s.final_answer_numeric, a.numeric_value, a.tolerance);
-    }
-    const res = a.multi_valued
-      ? checkMultiAnswer(s.final_answer_latex, a)
-      : checkOpenAnswer(s.final_answer_latex, a);
-    if (res === "correct") return true;
-    if (res === "incorrect") {
-      // last chance: numeric parse both sides
-      const sn = s.final_answer_numeric ?? parseNumeric(normalizeMath(s.final_answer_latex));
-      const tn = a.numeric_value ?? parseNumeric(normalizeMath(a.value_latex));
-      if (sn !== null && tn !== null) return numbersEqual(sn, tn, a.tolerance);
-      return false;
-    }
-    // "uncertain": numerics first because they settle it for free, then ask.
-    const sn = s.final_answer_numeric ?? parseNumeric(normalizeMath(s.final_answer_latex));
-    const tn = a.numeric_value ?? parseNumeric(normalizeMath(a.value_latex));
-    if (sn !== null && tn !== null) return numbersEqual(sn, tn, a.tolerance);
-    return meansTheSame(s.final_answer_latex, a);
+    return answerAgrees(s.final_answer_latex, p.answer, s.final_answer_numeric);
   }
   if (p.format === "matching") {
     // Set equality on pairs: a solver that gets one pairing wrong necessarily
@@ -504,22 +510,10 @@ export async function solverAgrees(
     );
     for (const part of p.parts) {
       const given = solved.get(part.label.trim().toLowerCase());
+      // A part the solver never answered is a disagreement, not a pass: the
+      // ladder below would read the missing answer as an empty one.
       if (given === undefined) return false;
-      const res = part.answer.multi_valued
-        ? checkMultiAnswer(given, part.answer)
-        : checkOpenAnswer(given, part.answer);
-      if (res === "correct") continue;
-      // Same last-chance numeric reconciliation the `open` case uses: an
-      // unsimplified but numerically right part shouldn't fail the problem.
-      const sn = parseNumeric(normalizeMath(given));
-      const tn = part.answer.numeric_value ?? parseNumeric(normalizeMath(part.answer.value_latex));
-      if (sn !== null && tn !== null) {
-        if (numbersEqual(sn, tn, part.answer.tolerance)) continue;
-        return false;
-      }
-      // A part answered in prose gets the same escalation as a whole `open`
-      // problem — the parts of a proof are prose far more often than not.
-      if (res === "incorrect" || !(await meansTheSame(given, part.answer))) return false;
+      if (!(await answerAgrees(given, part.answer))) return false;
     }
     return true;
   }
@@ -527,19 +521,13 @@ export async function solverAgrees(
     const plot = plotFromSpec(p.plot);
     if (!plot) return false;
     switch (p.response_kind) {
-      case "value": {
-        if (!p.answer) return false;
-        const res = p.answer.multi_valued
-          ? checkMultiAnswer(s.final_answer_latex, p.answer)
-          : checkOpenAnswer(s.final_answer_latex, p.answer);
-        if (res === "correct") return true;
-        const sn = s.final_answer_numeric ?? parseNumeric(normalizeMath(s.final_answer_latex));
-        const tn = p.answer.numeric_value ?? parseNumeric(normalizeMath(p.answer.value_latex));
-        if (sn !== null && tn !== null) return numbersEqual(sn, tn, p.answer.tolerance);
-        // Reading a value off a plot is usually numeric, so this rarely fires —
-        // but when it doesn't parse, the answer is prose and deserves the ask.
-        return res !== "incorrect" && (await meansTheSame(s.final_answer_latex, p.answer));
-      }
+      case "value":
+        // Reading a value off a plot is usually numeric, so the ladder normally
+        // ends at its numeric step — but a prose answer here deserves the ask
+        // for the same reason it does anywhere else.
+        return p.answer
+          ? answerAgrees(s.final_answer_latex, p.answer, s.final_answer_numeric)
+          : false;
       case "points":
         // Tolerant here, exact at grading time: the solver is being asked to
         // agree that the key is right, not to click.
