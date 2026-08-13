@@ -1,3 +1,4 @@
+import { requestFailed } from "@/lib/post-json";
 import type { BuildEvent } from "@/lib/sets";
 
 /**
@@ -17,10 +18,7 @@ export async function* streamBuild(body: unknown): AsyncGenerator<BuildEvent> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok || !res.body) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error ?? `Request failed (${res.status})`);
-  }
+  if (!res.ok || !res.body) throw await requestFailed(res, `Request failed (${res.status})`);
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

@@ -8,6 +8,7 @@ import { ProblemCard } from "@/components/problem-card";
 import { Prose } from "@/components/latex";
 import { EmptySet } from "@/components/practice/empty-set";
 import { formatDuration } from "@/lib/format";
+import { postJson } from "@/lib/post-json";
 import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
 import type { Outcome } from "@/lib/progress";
 
@@ -145,23 +146,13 @@ export function PracticeEngine({
       if (inFlight.current.has(problemId)) return;
       inFlight.current.add(problemId);
       try {
-        const res = await fetch("/api/check", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            problemId,
-            setId: set.id,
-            mode: "practice",
-            action: "recall",
-          }),
-        });
-        if (res.ok) {
-          const data = (await res.json()) as CheckResponse;
-          setResults((prev) => ({ ...prev, [problemId]: data }));
-          setRecallState((prev) => ({ ...prev, [problemId]: "done" }));
-        } else {
-          setRecallState((prev) => ({ ...prev, [problemId]: "failed" }));
-        }
+        const data = await postJson<CheckResponse>(
+          "/api/check",
+          { problemId, setId: set.id, mode: "practice", action: "recall" },
+          "Recall failed"
+        );
+        setResults((prev) => ({ ...prev, [problemId]: data }));
+        setRecallState((prev) => ({ ...prev, [problemId]: "done" }));
       } catch {
         // A failed recall just means the card opens without the earlier
         // answer — the outcome is still recorded, so nothing is lost.
@@ -453,24 +444,18 @@ export function PracticeEngine({
           initialResult={cached ?? null}
           locked={awaitingHistory}
           onCheck={async (action, answer) => {
-            const res = await fetch("/api/check", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
+            const data = await postJson<CheckResponse>(
+              "/api/check",
+              {
                 problemId: problem.id,
                 setId: set.id,
                 mode: "practice",
                 action,
                 answer,
                 timeMs: Math.min(Date.now() - startedAt.current, MAX_TIME_MS),
-              }),
-            });
-            if (!res.ok) {
-              throw new Error(
-                (await res.json().catch(() => null))?.error ?? "Check failed"
-              );
-            }
-            const data = (await res.json()) as CheckResponse;
+              },
+              "Check failed"
+            );
             // Hold on to what they submitted, so coming back to this problem
             // replays their own answer without another round-trip.
             setResults((prev) => ({

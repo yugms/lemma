@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, Loader2, Sparkles, Upload, X } from "lucide-react";
 import clsx from "clsx";
+import { postJson, RequestFailed } from "@/lib/post-json";
 
 /**
  * Turn a worksheet, a chapter or a page of notes into something practice can be
@@ -80,30 +81,27 @@ export function MaterialUploader() {
       }
 
       setPhase("reading");
-      const res = await fetch("/api/materials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths, text: text.trim(), want: want.trim() }),
-      });
-      const json = await res.json();
-      /**
-       * A rejection is still a material, and it is the one case where the
-       * server hands back an id alongside the error. The stored row explains
-       * itself on its own page — our copy, keyed off the closed verdict — and
-       * without this the row was written, listed nowhere (the index shows only
-       * `ready`), and reachable only by typing the URL.
-       *
-       * Every other failure has no id to go to and stays on the form.
-       */
-      if (res.status === 422 && json.materialId) {
-        router.push(`/materials/${json.materialId}`);
-        return;
-      }
-      if (!res.ok) throw new Error(json.error ?? "Couldn't read that one.");
-
-      router.push(`/materials/${json.materialId}`);
+      const { materialId } = await postJson<{ materialId: string }>(
+        "/api/materials",
+        { paths, text: text.trim(), want: want.trim() },
+        "Couldn't read that one."
+      );
+      router.push(`/materials/${materialId}`);
       // Left busy through the navigation, so nothing can be submitted twice.
     } catch (e) {
+      /**
+       * A rejection is still a material, and it is the one failure that has
+       * somewhere to go: the server hands back the id of the row it declined,
+       * whose own page explains the verdict in our words. Without this the row
+       * was written, listed nowhere (the index shows only `ready`), and
+       * reachable only by typing the URL.
+       *
+       * Every other failure has no id and stays on the form.
+       */
+      if (e instanceof RequestFailed && typeof e.body.materialId === "string") {
+        router.push(`/materials/${e.body.materialId}`);
+        return;
+      }
       setError(e instanceof Error ? e.message : "Something went wrong.");
       setPhase("idle");
     }

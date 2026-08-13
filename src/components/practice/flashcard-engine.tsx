@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, RotateCcw, Shuffle, X } from "lucide-react";
 import { ProblemCard } from "@/components/problem-card";
+import { postJson } from "@/lib/post-json";
 import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
 
 const MAX_TIME_MS = 3_600_000;
@@ -150,10 +151,9 @@ export function FlashcardEngine({
           index={current + 1}
           total={order.length}
           onCheck={async (action, answer) => {
-            const res = await fetch("/api/check", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
+            const data = await postJson<CheckResponse>(
+              "/api/check",
+              {
                 problemId: card.id,
                 // Sent for the ownership check; the route stores null so the
                 // rep stays out of this set's record.
@@ -162,14 +162,9 @@ export function FlashcardEngine({
                 action,
                 answer,
                 timeMs: Math.min(Date.now() - startedAt.current, MAX_TIME_MS),
-              }),
-            });
-            if (!res.ok) {
-              throw new Error(
-                (await res.json().catch(() => null))?.error ?? "Check failed"
-              );
-            }
-            const data = (await res.json()) as CheckResponse;
+              },
+              "Check failed"
+            );
             setResult(data);
             return data;
           }}

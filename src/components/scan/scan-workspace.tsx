@@ -3,6 +3,7 @@
 import { useState } from "react";
 import clsx from "clsx";
 import { Camera, Check, HelpCircle, Loader2, Minus, Upload, X } from "lucide-react";
+import { postJson } from "@/lib/post-json";
 import { wasAttempted } from "@/lib/scan-marks";
 import type { ScanMark } from "@/lib/ai/grade-scan";
 import type { WorksheetGrading } from "@/lib/worksheets";
@@ -91,13 +92,11 @@ export function ScanWorkspace({
       }
 
       setPhase("marking");
-      const res = await fetch("/api/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ setId, paths }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "That work couldn't be marked.");
+      const json = await postJson<{ grading: WorksheetGrading; uploadId: string }>(
+        "/api/scan",
+        { setId, paths },
+        "That work couldn't be marked."
+      );
       setGrading(json.grading);
       setUploadId(json.uploadId);
       setPhase("done");
@@ -112,13 +111,11 @@ export function ScanWorkspace({
     setConfirming(true);
     setError(null);
     try {
-      const res = await fetch("/api/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "confirm", uploadId, positions }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Couldn't record that.");
+      const json = await postJson<{ grading: WorksheetGrading }>(
+        "/api/scan",
+        { action: "confirm", uploadId, positions },
+        "Couldn't record that."
+      );
       setGrading(json.grading);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't record that — try again.");
