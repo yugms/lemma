@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/auth-server";
-import { loadSetForUser } from "@/lib/sets";
+import { loadSetForUser } from "@/lib/sets-read";
 import { loadSetProgress } from "@/lib/progress";
 import { prepareProblem } from "@/lib/math-render";
 import { QuizEngine } from "@/components/practice/quiz-engine";

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ArrowLeft } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth-server";
-import { loadSetForUser } from "@/lib/sets";
+import { loadSetForUser } from "@/lib/sets-read";
 import { latestUpload } from "@/lib/worksheets";
 import { ScanWorkspace } from "@/components/scan/scan-workspace";
 

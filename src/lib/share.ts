@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { capFor, CAP_CHECK_FAILED, startOfToday } from "@/lib/limits";
-import { ITEM_SELECT, sanitizeItems, type SetConfig, type SetMeta } from "@/lib/sets";
+import { ITEM_SELECT, sanitizeItems, type SetMeta } from "@/lib/sets-read";
+import type { SetConfig } from "@/lib/sets";
 import { newShareCode, normalizeShareCode } from "@/lib/share-code";
 import type { SanitizedProblem } from "@/lib/ai/schemas";
 

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/auth-server";
-import { loadSetForUser } from "@/lib/sets";
+import { loadSetForUser } from "@/lib/sets-read";
 import { loadAnswerKey } from "@/lib/print-key";
 import { prepareProblem } from "@/lib/math-render";
 import { Prose } from "@/components/latex";
