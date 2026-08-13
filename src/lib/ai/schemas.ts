@@ -63,7 +63,7 @@ export type ChoiceId = (typeof CHOICE_IDS)[number];
  */
 const MATCH_TARGET_IDS = ["1", "2", "3", "4", "5", "6", "7"] as const;
 
-export const OpenAnswerSchema = z.object({
+const OpenAnswerSchema = z.object({
   value_latex: z
     .string()
     .describe("The canonical answer in LaTeX, e.g. \\frac{3}{4} or x=2,\\ x=-5"),
@@ -85,7 +85,7 @@ export const OpenAnswerSchema = z.object({
 });
 export type OpenAnswer = z.infer<typeof OpenAnswerSchema>;
 
-export const ExplanationStepSchema = z.object({
+const ExplanationStepSchema = z.object({
   latex: z.string().describe("The math for this step in LaTeX (may be empty for prose-only steps)"),
   note: z
     .string()
@@ -109,7 +109,7 @@ const baseFields = {
     .describe("Complete step-by-step solution, 2-8 steps"),
 };
 
-export const McqProblemSchema = z.object({
+const McqProblemSchema = z.object({
   ...baseFields,
   format: z.literal("mcq"),
   choices: z
@@ -128,13 +128,13 @@ export const McqProblemSchema = z.object({
     .describe("One entry per wrong choice"),
 });
 
-export const OpenProblemSchema = z.object({
+const OpenProblemSchema = z.object({
   ...baseFields,
   format: z.literal("open"),
   answer: OpenAnswerSchema,
 });
 
-export const FillBlankProblemSchema = z.object({
+const FillBlankProblemSchema = z.object({
   ...baseFields,
   format: z.literal("fill_blank"),
   // statement_latex contains placeholders {{1}}, {{2}}, ...
@@ -148,7 +148,7 @@ export const FillBlankProblemSchema = z.object({
  * one misconception among four true statements can still pick the single right
  * answer by elimination, but cannot pick the right *set*.
  */
-export const MultiSelectProblemSchema = z.object({
+const MultiSelectProblemSchema = z.object({
   ...baseFields,
   format: z.literal("multi_select"),
   choices: z
@@ -174,7 +174,7 @@ export const MultiSelectProblemSchema = z.object({
  * rather than arithmetic — a student can know every individual manipulation and
  * still not know which comes first.
  */
-export const OrderingProblemSchema = z.object({
+const OrderingProblemSchema = z.object({
   ...baseFields,
   format: z.literal("ordering"),
   items: z
@@ -192,7 +192,7 @@ export const OrderingProblemSchema = z.object({
  * load-bearing: with an equal number on both sides the last pair is free, so a
  * student who knows n-1 of them scores n.
  */
-export const MatchingProblemSchema = z.object({
+const MatchingProblemSchema = z.object({
   ...baseFields,
   format: z.literal("matching"),
   left: z
@@ -220,7 +220,7 @@ export const MatchingProblemSchema = z.object({
  * Graded all-or-nothing, like `fill_blank`: partial credit would make the set
  * score mean something different for this format than for every other.
  */
-export const MultiPartProblemSchema = z.object({
+const MultiPartProblemSchema = z.object({
   ...baseFields,
   format: z.literal("multi_part"),
   parts: z
@@ -273,7 +273,7 @@ const PointSchema = z.object({ x: z.number(), y: z.number() });
  * stricter per-kind schemas below, so a model is only ever shown the one field
  * it is meant to fill.
  */
-export const GraphProblemSchema = z.object({
+const GraphProblemSchema = z.object({
   ...baseFields,
   format: z.literal("graph"),
   plot: PlotSpecSchema,
@@ -290,14 +290,14 @@ const graphBase = {
 };
 
 /** Read the plot, type an answer. Graded by the existing open-answer ladder. */
-export const GraphValueProblemSchema = z.object({
+const GraphValueProblemSchema = z.object({
   ...graphBase,
   response_kind: z.literal("value"),
   answer: OpenAnswerSchema,
 });
 
 /** Read the plot, click the points being asked for. */
-export const GraphPointsProblemSchema = z.object({
+const GraphPointsProblemSchema = z.object({
   ...graphBase,
   response_kind: z.literal("points"),
   correct_points: z
@@ -306,7 +306,7 @@ export const GraphPointsProblemSchema = z.object({
 });
 
 /** Produce a curve by positioning it, rather than reading one. */
-export const GraphSketchProblemSchema = z.object({
+const GraphSketchProblemSchema = z.object({
   ...graphBase,
   response_kind: z.literal("sketch"),
   target_curve: PlotCurveSpecSchema.describe(
