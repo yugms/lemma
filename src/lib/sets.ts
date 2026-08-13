@@ -308,12 +308,25 @@ export async function* buildProblemSet(
    * was in model time at all, and which phase spent it. Answering "why did that
    * take two minutes" needs both — the pool and template phases are supposed to
    * be free, and the only way to notice they stopped being free is to time them.
+   *
+   * It owns both deltas, and the count for the same reason as the clock: every
+   * phase appends to one running `chosen`, so a phase that reports its own
+   * length reports its predecessors' work as well. Read literally, a build that
+   * reused three pool problems and then ran templates to no effect said the
+   * templates filled three. Only the first phase can get that right by accident,
+   * which is not a property to leave a future phase to rediscover.
    */
   let lastMark = Date.now();
+  let lastCount = 0;
   const mark = (phase: string, extra = "") => {
     const now = Date.now();
-    console.info(`[lemma/build] phase=${phase} ms=${now - lastMark}${extra && ` ${extra}`}`);
+    console.info(
+      `[lemma/build] phase=${phase} ms=${now - lastMark} added=${chosen.length - lastCount}${
+        extra && ` ${extra}`
+      }`
+    );
     lastMark = now;
+    lastCount = chosen.length;
   };
 
   // --- 1. pool reuse ---
@@ -355,7 +368,7 @@ export async function* buildProblemSet(
       yield tick();
     }
   }
-  mark("pool", `reused=${chosen.length}`);
+  mark("pool");
 
   // A bespoke set aims at a narrow target — the problems this student got wrong,
   // or the shape of the page they uploaded — which is exactly where the author
@@ -376,11 +389,6 @@ export async function* buildProblemSet(
   // Templates are deterministic drills; they can't be aimed at a misconception
   // or at somebody's worksheet, so a bespoke set skips them for the same reason
   // it skips the pool.
-  // `chosen` is the running total, so the trace has to report the difference:
-  // `filled=3` on a build whose templates ran and contributed nothing reads as
-  // the opposite of what happened, and a phase trace nobody trusts is worse
-  // than none.
-  const beforeTemplates = chosen.length;
   const templateSlots = bespoke(config) ? 0 : count - chosen.length;
   if (templateSlots > 0) {
     const eligible = topics.flatMap((t) =>
@@ -417,7 +425,7 @@ export async function* buildProblemSet(
       yield tick();
     }
   }
-  mark("templates", `filled=${chosen.length - beforeTemplates}`);
+  mark("templates");
 
   // --- 3. AI generation + verification ---
   // Stop starting new AI rounds once we're close to the route's maxDuration:
@@ -562,7 +570,11 @@ export async function* buildProblemSet(
       done++;
     }
     yield tick();
-    mark(regenAttempted ? "ai-regen" : "ai-round", `wanted=${wanted} kept=${verified.length}`);
+    // `verified` is what passed the checks, which is not what the set got:
+    // the surplus past `aiNeeded` is dropped and rows sharing a hash collapse
+    // in the upsert. A round that traces eight and adds five is a round that
+    // is about to run again, and the difference is the only warning of it.
+    mark(regenAttempted ? "ai-regen" : "ai-round", `wanted=${wanted} verified=${verified.length}`);
 
     aiNeeded = count - chosen.length;
     if (aiNeeded > 0) {
