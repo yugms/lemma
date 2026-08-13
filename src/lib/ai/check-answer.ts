@@ -1,10 +1,15 @@
 import { callStructured, CHECKER_MODELS } from "@/lib/ai/provider";
 import { FEEDBACK_SYSTEM_PROMPT } from "@/lib/ai/prompts";
-import { askModelIfEquivalent, notEquivalentWithoutAsking } from "@/lib/ai/equivalence";
+import {
+  askModelIfEquivalent,
+  notEquivalentWithoutAsking,
+  type EquivalenceCheck,
+} from "@/lib/ai/equivalence";
 import {
   assertNeverFormat,
   FeedbackResultSchema,
   type FeedbackResult,
+  type OpenAnswer,
   type ProblemAnswerRecord,
   type ProblemContentRecord,
   type ProblemExplanationRecord,
@@ -17,14 +22,6 @@ import {
   pointsMatch,
   type PlotCurve,
 } from "@/lib/plot";
-
-export type CheckMethod = "local" | "ai";
-
-export type CheckOutcome = {
-  correct: boolean;
-  /** How the answer was decided. */
-  method: CheckMethod;
-};
 
 /**
  * Decide whether a submitted answer is correct, using AI only when local
@@ -42,85 +39,56 @@ export async function checkSubmission(
   answer: ProblemAnswerRecord,
   submitted: unknown,
   { allowAi = true }: { allowAi?: boolean } = {}
-): Promise<CheckOutcome> {
+): Promise<boolean> {
   const aiEquivalent = allowAi ? askModelIfEquivalent : notEquivalentWithoutAsking;
-  // Reported honestly: with no budget left nothing was asked, so the verdict
-  // came from local comparison however it reads.
-  const escalationMethod = allowAi ? "ai" : "local";
 
   switch (content.format) {
     case "mcq":
-      return {
-        correct:
-          typeof submitted === "string" &&
-          submitted.trim().toUpperCase() === answer.correct_choice_id,
-        method: "local",
-      };
+      return (
+        typeof submitted === "string" &&
+        submitted.trim().toUpperCase() === answer.correct_choice_id
+      );
 
     case "multi_select": {
       // Set equality, so a student who picks a true statement but misses
       // another is wrong — which is the point of the format.
       const picked = new Set(submittedIds(submitted));
       const truth = new Set(answer.correct_choice_ids ?? []);
-      return {
-        correct: picked.size === truth.size && [...truth].every((id) => picked.has(id)),
-        method: "local",
-      };
+      return picked.size === truth.size && [...truth].every((id) => picked.has(id));
     }
 
     case "ordering": {
       const order = submittedIds(submitted);
       const truth = answer.correct_order ?? [];
-      return {
-        correct: order.length === truth.length && order.every((id, i) => id === truth[i]),
-        method: "local",
-      };
+      return order.length === truth.length && order.every((id, i) => id === truth[i]);
     }
 
     case "fill_blank": {
       const values = (submitted ?? {}) as Record<string, string>;
       for (const blank of answer.blanks ?? []) {
-        const student = values[String(blank.index)] ?? "";
-        const res = blank.answer.multi_valued
-          ? checkMultiAnswer(student, blank.answer)
-          : checkOpenAnswer(student, blank.answer);
-        if (res === "incorrect") return { correct: false, method: "local" };
-        if (res === "uncertain") {
-          const eq = await aiEquivalent(
-            student,
-            blank.answer.value_latex,
-            blank.answer.acceptable_forms
-          );
-          if (!eq) return { correct: false, method: escalationMethod };
-        }
+        const ok = await gradeAgainst(
+          values[String(blank.index)] ?? "",
+          blank.answer,
+          aiEquivalent
+        );
+        if (!ok) return false;
       }
-      return { correct: true, method: "local" };
+      return true;
     }
 
-    case "open": {
-      const student = String(submitted ?? "");
-      const canonical = answer.answer;
-      if (!canonical) return { correct: false, method: "local" };
-      const res = canonical.multi_valued
-        ? checkMultiAnswer(student, canonical)
-        : checkOpenAnswer(student, canonical);
-      if (res !== "uncertain") return { correct: res === "correct", method: "local" };
-      const eq = await aiEquivalent(student, canonical.value_latex, canonical.acceptable_forms);
-      return { correct: eq, method: escalationMethod };
-    }
+    case "open":
+      return gradeAgainst(String(submitted ?? ""), answer.answer, aiEquivalent);
 
     case "matching": {
       // Submitted as { leftId: rightId }. Every left item must be paired, and
       // paired correctly — there is no partial credit, same as fill_blank.
       const picked = submittedPairs(submitted);
       const truth = answer.correct_pairs ?? [];
-      return {
-        correct:
-          truth.length > 0 &&
-          picked.size === truth.length &&
-          truth.every((pair) => picked.get(pair.left_id) === pair.right_id),
-        method: "local",
-      };
+      return (
+        truth.length > 0 &&
+        picked.size === truth.length &&
+        truth.every((pair) => picked.get(pair.left_id) === pair.right_id)
+      );
     }
 
     case "multi_part": {
@@ -128,71 +96,65 @@ export async function checkSubmission(
       // the escalation to an equivalence call on an inconclusive part.
       const values = (submitted ?? {}) as Record<string, string>;
       const parts = answer.parts ?? [];
-      if (parts.length === 0) return { correct: false, method: "local" };
-      let usedAi = false;
+      if (parts.length === 0) return false;
       for (const part of parts) {
-        const student = values[part.label] ?? "";
-        const res = part.answer.multi_valued
-          ? checkMultiAnswer(student, part.answer)
-          : checkOpenAnswer(student, part.answer);
-        if (res === "incorrect") return { correct: false, method: usedAi ? escalationMethod : "local" };
-        if (res === "uncertain") {
-          usedAi = true;
-          const eq = await aiEquivalent(
-            student,
-            part.answer.value_latex,
-            part.answer.acceptable_forms
-          );
-          if (!eq) return { correct: false, method: escalationMethod };
-        }
+        const ok = await gradeAgainst(values[part.label] ?? "", part.answer, aiEquivalent);
+        if (!ok) return false;
       }
-      return { correct: true, method: usedAi ? escalationMethod : "local" };
+      return true;
     }
 
     case "graph": {
       switch (content.response_kind) {
-        case "value": {
-          const student = String(submitted ?? "");
-          const canonical = answer.answer;
-          if (!canonical) return { correct: false, method: "local" };
-          const res = canonical.multi_valued
-            ? checkMultiAnswer(student, canonical)
-            : checkOpenAnswer(student, canonical);
-          if (res !== "uncertain") return { correct: res === "correct", method: "local" };
-          const eq = await aiEquivalent(
-            student,
-            canonical.value_latex,
-            canonical.acceptable_forms
-          );
-          return { correct: eq, method: escalationMethod };
-        }
+        case "value":
+          return gradeAgainst(String(submitted ?? ""), answer.answer, aiEquivalent);
         case "points":
           // Both sides are lattice points by construction, so this is exact —
           // no model call, and no tolerance to argue about.
-          return {
-            correct: pointsMatch(submittedPoints(submitted), answer.correct_points ?? []),
-            method: "local",
-          };
+          return pointsMatch(submittedPoints(submitted), answer.correct_points ?? []);
         case "sketch": {
           const target = answer.target_curve ? curveFromAuthored(answer.target_curve) : null;
           const drawn = submittedCurve(submitted);
           const plot = content.plot ? plotFromSpec(content.plot) : null;
-          if (!target || !drawn || !plot) return { correct: false, method: "local" };
+          if (!target || !drawn || !plot) return false;
           // Handles land on the lattice, so an exactly-positioned curve matches
           // exactly; the tolerance only absorbs float error in the fit.
-          return {
-            correct: curvesMatch(drawn, target, plot.window, 1e-6),
-            method: "local",
-          };
+          return curvesMatch(drawn, target, plot.window, 1e-6);
         }
         default:
-          return { correct: false, method: "local" };
+          return false;
       }
     }
 
     default:
       return assertNeverFormat(content.format);
   }
+}
+
+/**
+ * One typed answer against one canonical answer: local comparison, and a single
+ * equivalence call only when local comparison is inconclusive.
+ *
+ * This is the whole open-answer ladder, and it was written out four times —
+ * `open`, `graph`/`value`, and once per item inside `fill_blank` and
+ * `multi_part`. The copies had already drifted over what "uncertain" costs, so
+ * a fifth format is now graded by adding a caller rather than by re-deciding
+ * it.
+ *
+ * A missing canonical answer is wrong rather than right: an authored problem
+ * with nothing to compare against can't credit a guess.
+ */
+async function gradeAgainst(
+  student: string,
+  canonical: OpenAnswer | null | undefined,
+  aiEquivalent: EquivalenceCheck
+): Promise<boolean> {
+  if (!canonical) return false;
+  const res = canonical.multi_valued
+    ? checkMultiAnswer(student, canonical)
+    : checkOpenAnswer(student, canonical);
+  if (res !== "uncertain") return res === "correct";
+  return aiEquivalent(student, canonical.value_latex, canonical.acceptable_forms);
 }
 
 /** Selected points off the wire: `[{x, y}, ...]`, with anything malformed dropped. */

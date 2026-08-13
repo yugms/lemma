@@ -321,19 +321,13 @@ describe("every graph response kind survives the round trip", () => {
 
       it("grades a right and a wrong submission", async () => {
         const { content, answer } = splitProblem(problem);
-        await expect(checkSubmission(content, answer, right)).resolves.toMatchObject({
-          correct: true,
-        });
-        await expect(checkSubmission(content, answer, wrong)).resolves.toMatchObject({
-          correct: false,
-        });
+        await expect(checkSubmission(content, answer, right)).resolves.toBe(true);
+        await expect(checkSubmission(content, answer, wrong)).resolves.toBe(false);
       });
 
       it("grades an empty submission as wrong rather than throwing", async () => {
         const { content, answer } = splitProblem(problem);
-        await expect(checkSubmission(content, answer, undefined)).resolves.toMatchObject({
-          correct: false,
-        });
+        await expect(checkSubmission(content, answer, undefined)).resolves.toBe(false);
       });
 
       it("prints a usable answer key", () => {
@@ -421,19 +415,13 @@ describe("every format survives the round trip", () => {
 
       it("grades a right and a wrong submission", async () => {
         const { content, answer } = splitProblem(problem);
-        await expect(checkSubmission(content, answer, right)).resolves.toMatchObject({
-          correct: true,
-        });
-        await expect(checkSubmission(content, answer, wrong)).resolves.toMatchObject({
-          correct: false,
-        });
+        await expect(checkSubmission(content, answer, right)).resolves.toBe(true);
+        await expect(checkSubmission(content, answer, wrong)).resolves.toBe(false);
       });
 
       it("grades an empty submission as wrong rather than throwing", async () => {
         const { content, answer } = splitProblem(problem);
-        await expect(checkSubmission(content, answer, undefined)).resolves.toMatchObject({
-          correct: false,
-        });
+        await expect(checkSubmission(content, answer, undefined)).resolves.toBe(false);
       });
 
       it("prints a non-empty answer key", () => {

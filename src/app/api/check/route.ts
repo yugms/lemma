@@ -294,12 +294,12 @@ export async function POST(request: NextRequest) {
       );
     }
     const allowAi = await aiGradingAllowed(user.id, user.is_anonymous ?? false);
-    const outcome = await checkSubmission(content, answer, body.answer, { allowAi });
+    const correct = await checkSubmission(content, answer, body.answer, { allowAi });
     // Diagnose the second attempt on its own terms. Reusing the first attempt's
     // note would explain an answer the student is no longer giving, and the
     // retry is the one moment the diagnosis matters most.
     const retryFeedback =
-      outcome.correct || !allowAi
+      correct || !allowAi
         ? null
         : await wrongAnswerFeedback(content, answer, explanation, body.answer);
 
@@ -310,7 +310,7 @@ export async function POST(request: NextRequest) {
       problem_id: body.problemId,
       mode: body.mode,
       answer: body.answer as never,
-      is_correct: outcome.correct,
+      is_correct: correct,
       ai_feedback: retryFeedback,
       time_ms: body.timeMs ?? null,
       attempt_no: 2,
@@ -326,7 +326,7 @@ export async function POST(request: NextRequest) {
       feedback: renderFeedback(retryFeedback ?? first!.ai_feedback),
       ...disclosure(),
       submitted: first!.answer ?? undefined,
-      retry: { correct: outcome.correct, submitted: body.answer },
+      retry: { correct, submitted: body.answer },
       can_retry: false,
     } satisfies CheckResponse);
   }
@@ -356,9 +356,9 @@ export async function POST(request: NextRequest) {
   // diagnosis. Over it, the answer is still graded — locally — and only the
   // explanation is lost. See `aiGradingAllowed`.
   const allowAi = await aiGradingAllowed(user.id, user.is_anonymous ?? false);
-  const outcome = await checkSubmission(content, answer, body.answer, { allowAi });
+  const correct = await checkSubmission(content, answer, body.answer, { allowAi });
   let feedback = null;
-  if (!outcome.correct && allowAi) {
+  if (!correct && allowAi) {
     feedback = await wrongAnswerFeedback(content, answer, explanation, body.answer);
   }
 
@@ -368,7 +368,7 @@ export async function POST(request: NextRequest) {
     problem_id: body.problemId,
     mode: body.mode,
     answer: body.answer as never,
-    is_correct: outcome.correct,
+    is_correct: correct,
     ai_feedback: feedback,
     time_ms: body.timeMs ?? null,
   });
@@ -389,7 +389,7 @@ export async function POST(request: NextRequest) {
   // attempt, so the same rule applies with it standing in as `first`.
   const canRetryNow = retryEligible(
     body.setId,
-    { is_correct: outcome.correct },
+    { is_correct: correct },
     null,
     body.mode
   );
@@ -402,7 +402,7 @@ export async function POST(request: NextRequest) {
   }
 
   return Response.json({
-    correct: outcome.correct,
+    correct,
     feedback: renderFeedback(feedback),
     ...disclosure(),
     can_retry: false,
