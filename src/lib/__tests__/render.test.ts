@@ -162,6 +162,20 @@ describe("structuralCheck agrees with the renderer", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("still rejects two labels that differ only by spacing", () => {
+    // `normalizeMath` strips whitespace, so these collided while they were
+    // being classified as math. Reading them as prose has to keep catching it.
+    const result = structuralCheck(
+      selectAll([
+        { id: "A", latex: "Step 1" },
+        { id: "B", latex: "Step  1" },
+        { id: "C", latex: "Step 3" },
+        { id: "D", latex: "Step 4" },
+      ])
+    );
+    expect(result.ok).toBe(false);
+  });
+
   it("classifies every shape the checker and renderer share", () => {
     expect(inlineShape("\\frac{5}{8}")).toBe("math");
     expect(inlineShape("The portion who play is \\frac{7}{25}.")).toBe("prose");
@@ -170,30 +184,43 @@ describe("structuralCheck agrees with the renderer", () => {
     expect(inlineShape("   ")).toBe("empty");
   });
 
-  it("reads a word and a number as a label, not an expression", () => {
+  it("reads words and bare numbers as a label, not an expression", () => {
     // Error-analysis choices name the step that went wrong; in math mode the
-    // space vanishes and the reader is offered `Step1`.
-    expect(inlineShape("Step 1")).toBe("prose");
-    expect(inlineShape("Option 2.")).toBe("prose");
-    expect(inlineShape("Line 12)")).toBe("prose");
-    // Still expressions: an identifier and its argument has the same shape as
-    // a label, so only the words that name a numbered thing count as one.
-    expect(inlineShape("sin 2")).toBe("math");
-    expect(inlineShape("log 2")).toBe("math");
-    expect(inlineShape("cos 30")).toBe("math");
-    expect(inlineShape("ln 4")).toBe("math");
-    expect(inlineShape("x 2")).toBe("math");
-    expect(inlineShape("2x + 1")).toBe("math");
-    expect(inlineShape("\\log_2 8")).toBe("math");
-    expect(inlineShape("Step 1: divide by \\(3\\)")).toBe("prose");
+    // space vanishes and the reader is offered `Step1`. The near neighbours of
+    // that string matter as much as the string itself — a first pass keyed off
+    // a list of naming words fixed "Step 1" and left every one of these
+    // shipping run-together.
+    for (const label of [
+      "Step 1",
+      "Step 2 and 3",
+      "Steps 1",
+      "Step 1,",
+      "Step 1a",
+      "Option 2.",
+      "Line 12)",
+      "Question 4",
+      "Table 2",
+      "Property 2",
+      "12 apples",
+    ]) {
+      expect(inlineShape(label)).toBe("prose");
+    }
+    expect(rendered(renderInline("Step 1"))).toBe(false);
   });
 
-  it("keeps an identifier and its argument in KaTeX", () => {
-    for (const expr of ["sin 2", "log 2", "cos 30", "ln 4"]) {
+  it("leaves an identifier and its argument as an expression", () => {
+    // The same shape as a label, and the reason the naming word cannot be the
+    // test: the nouns are open-ended, these are not.
+    for (const expr of ["sin 2", "log 2", "cos 30", "ln 4", "max 5", "sqrt 2", "\\sin 2"]) {
+      expect(inlineShape(expr)).toBe("math");
       expect(rendered(renderInline(expr))).toBe(true);
     }
-    // And the label it is shaped like still reads as words.
-    expect(rendered(renderInline("Step 1"))).toBe(false);
+    // A lone letter is a variable rather than a word.
+    expect(inlineShape("x 2")).toBe("math");
+    expect(inlineShape("1 2 3")).toBe("math");
+    // An operator, macro or brace disqualifies the fragment outright.
+    expect(inlineShape("2x + 1")).toBe("math");
+    expect(inlineShape("\\log_2 8")).toBe("math");
   });
 });
 

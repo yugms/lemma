@@ -308,12 +308,52 @@ export async function* buildProblemSet(
    * was in model time at all, and which phase spent it. Answering "why did that
    * take two minutes" needs both — the pool and template phases are supposed to
    * be free, and the only way to notice they stopped being free is to time them.
+   *
+   * It owns both deltas, and the count for the same reason as the clock: every
+   * phase appends to one running `chosen`, so a phase that reports its own
+   * length reports its predecessors' work as well. Read literally, a build that
+   * reused three pool problems and then ran templates to no effect said the
+   * templates filled three. Only the first phase can get that right by accident,
+   * which is not a property to leave a future phase to rediscover.
    */
   let lastMark = Date.now();
+  let lastCount = 0;
   const mark = (phase: string, extra = "") => {
     const now = Date.now();
-    console.info(`[lemma/build] phase=${phase} ms=${now - lastMark}${extra && ` ${extra}`}`);
+    console.info(
+      `[lemma/build] phase=${phase} ms=${now - lastMark} added=${chosen.length - lastCount}${
+        extra && ` ${extra}`
+      }`
+    );
     lastMark = now;
+    lastCount = chosen.length;
+  };
+
+  /**
+   * Saving a batch may fail without taking the build with it.
+   *
+   * `insertProblems` throws, and both call sites sit outside the generation
+   * round's own try, so one transient Postgres error discarded the pool and
+   * template problems already in hand — and the route forwards `err.message`,
+   * so the student read the driver's. Everything else here degrades: a capacity
+   * failure keeps the batches that landed beside it, a failed check discards
+   * one problem. A write is not the exception.
+   *
+   * `saveFailed` is tracked rather than inferred from an empty return, because
+   * "written but not saved" is a third way to end with nothing and the copy for
+   * the other two blames either the model or the student's settings.
+   */
+  let saveFailed = false;
+  const saveProblems = async (rows: NewProblemRow[]) => {
+    try {
+      return await insertProblems(db, rows);
+    } catch (err) {
+      saveFailed = true;
+      console.error(
+        `[lemma/build] save failed: ${err instanceof Error ? err.message : "unknown error"}`
+      );
+      return [];
+    }
   };
 
   // --- 1. pool reuse ---
@@ -355,7 +395,7 @@ export async function* buildProblemSet(
       yield tick();
     }
   }
-  mark("pool", `reused=${chosen.length}`);
+  mark("pool");
 
   // A bespoke set aims at a narrow target — the problems this student got wrong,
   // or the shape of the page they uploaded — which is exactly where the author
@@ -376,11 +416,6 @@ export async function* buildProblemSet(
   // Templates are deterministic drills; they can't be aimed at a misconception
   // or at somebody's worksheet, so a bespoke set skips them for the same reason
   // it skips the pool.
-  // `chosen` is the running total, so the trace has to report the difference:
-  // `filled=3` on a build whose templates ran and contributed nothing reads as
-  // the opposite of what happened, and a phase trace nobody trusts is worse
-  // than none.
-  const beforeTemplates = chosen.length;
   const templateSlots = bespoke(config) ? 0 : count - chosen.length;
   if (templateSlots > 0) {
     const eligible = topics.flatMap((t) =>
@@ -393,11 +428,13 @@ export async function* buildProblemSet(
       yield { type: "status", message: "Generating drill problems..." };
       // Use templates for at most half the remaining slots when AI styles/formats
       // are also requested, else fill everything.
-      const aiPossible =
-        config.styles.some((s) => s !== "drill") || eligible.length === 0;
-      const fillTarget = aiPossible
-        ? Math.ceil(templateSlots / 2)
-        : templateSlots;
+      //
+      // Rounding down is what makes that "at most". Rounding up gave templates
+      // the last slot whenever an odd number was left, so a student who asked
+      // for word problems and whose pool filled five of six got a sixth drill
+      // and no AI problem at all.
+      const aiPossible = config.styles.some((s) => s !== "drill");
+      const fillTarget = aiPossible ? Math.floor(templateSlots / 2) : templateSlots;
       const rows: NewProblemRow[] = [];
       for (let i = 0; i < fillTarget; i++) {
         const pick = eligible[i % eligible.length];
@@ -409,7 +446,7 @@ export async function* buildProblemSet(
           })
         );
       }
-      const inserted = await insertProblems(db, rows);
+      const inserted = await saveProblems(rows);
       for (const row of inserted) {
         chosen.push({ problemId: row.id, statement: row.statement });
         done++;
@@ -417,7 +454,7 @@ export async function* buildProblemSet(
       yield tick();
     }
   }
-  mark("templates", `filled=${chosen.length - beforeTemplates}`);
+  mark("templates");
 
   // --- 3. AI generation + verification ---
   // Stop starting new AI rounds once we're close to the route's maxDuration:
@@ -555,14 +592,18 @@ export async function* buildProblemSet(
           config.material?.id
         )
       );
-    const inserted = await insertProblems(db, rows);
+    const inserted = await saveProblems(rows);
     for (const row of inserted) {
       if (chosen.length >= count) break;
       chosen.push({ problemId: row.id, statement: row.statement });
       done++;
     }
     yield tick();
-    mark(regenAttempted ? "ai-regen" : "ai-round", `wanted=${wanted} kept=${verified.length}`);
+    // `verified` is what passed the checks, which is not what the set got:
+    // the surplus past `aiNeeded` is dropped and rows sharing a hash collapse
+    // in the upsert. A round that traces eight and adds five is a round that
+    // is about to run again, and the difference is the only warning of it.
+    mark(regenAttempted ? "ai-regen" : "ai-round", `wanted=${wanted} verified=${verified.length}`);
 
     aiNeeded = count - chosen.length;
     if (aiNeeded > 0) {
@@ -575,13 +616,12 @@ export async function* buildProblemSet(
     // Naming the right one matters: "try different settings" is useless advice
     // when the settings were fine and the writer was simply unreachable, and it
     // was the only thing this said for either case.
-    yield {
-      type: "error",
-      message:
-        authored === 0
-          ? "The AI writer is busy right now, so nothing could be written for this set. Try again in a minute."
-          : "Could not generate any problems that passed verification. Try different settings.",
-    };
+    const reason = saveFailed
+      ? "The problems were written but could not be saved. Try again in a minute."
+      : authored === 0
+        ? "The AI writer is busy right now, so nothing could be written for this set. Try again in a minute."
+        : "Could not generate any problems that passed verification. Try different settings.";
+    yield { type: "error", message: reason };
     return;
   }
 

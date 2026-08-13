@@ -126,22 +126,37 @@ const PROSE_RUN = /[A-Za-z]{2,}\s+[A-Za-z]{2,}/;
 const MATH_SIGNAL = /\\[a-zA-Z]+|[\\^_{}=+\-*/<>]|\d/;
 
 /**
- * A numbered label: "Step 1", "Option 2".
- *
- * The digit is a math signal and a single word is not a prose run, so these
- * landed in math mode and KaTeX ate the space — an error-analysis problem
- * whose choices name the steps rendered them as italic `Step1`…`Step4`.
- *
- * The naming word is a closed list rather than "any word", because the general
- * form is also `sin 2` and `log 2` — an identifier applied to an argument,
- * which is an expression and has to keep reaching KaTeX. The two failures are
- * not symmetrical: a label this list misses is rendered exactly as it was
- * before, while an expression caught by mistake loses its rendering *and*
- * changes how `checkOptions` decides two choices are the same answer, since
- * shape is what picks `normalizeMath` over a plain lowercase compare.
+ * Function identifiers as a model writes them without a macro. `answers.ts`
+ * lists the same names to strip the backslash off `\sin`; here they are the
+ * reason a fragment shaped like a label is not one.
  */
-const LABEL =
-  /^(?:step|part|line|option|choice|case|figure|diagram|method|equation|statement|row|column|student)\s+\d{1,4}[.):]?$/i;
+const MATH_WORD =
+  /^(?:sin|cos|tan|sec|csc|cot|sinh|cosh|tanh|arcsin|arccos|arctan|ln|log|lg|exp|sqrt|lim|max|min|det|dim|deg|gcd|lcm|mod|arg)$/i;
+
+/** Words, numbers and sentence punctuation — no operator, macro or brace. */
+const LABEL_CHARS = /^[A-Za-z0-9 ,.:;'()-]+$/;
+
+/**
+ * Words and bare numbers, which is a label and not an expression: "Step 1",
+ * "Step 2 and 3", "12 apples".
+ *
+ * A digit is a math signal and one word is not a prose run, so these landed in
+ * math mode and KaTeX ate the space — an error-analysis problem whose choices
+ * name the steps rendered them as italic `Step1`…`Step4`.
+ *
+ * The naming word can be anything, because the set of nouns that can precede a
+ * numeral is open and a closed list of them just moves the bug to the next word
+ * somebody uses. What has to be excluded instead is the small closed set the
+ * shape collides with: an identifier applied to an argument, `sin 2`. A lone
+ * letter is a variable rather than a word for the same reason, which is what
+ * keeps `x 2` an expression.
+ */
+function isLabel(text: string): boolean {
+  if (!LABEL_CHARS.test(text)) return false;
+  const words = text.match(/[A-Za-z]+/g) ?? [];
+  if (!words.some((w) => w.length >= 2)) return false;
+  return !words.some((w) => MATH_WORD.test(w));
+}
 
 /** Macros and their arguments removed, so `\cdot` doesn't read as a word. */
 function withoutMath(text: string): string {
@@ -164,7 +179,7 @@ export function inlineShape(raw: string): "empty" | "prose" | "math" {
   if (/\\\(|\\\[|\{\{\d+\}\}/.test(text)) return "prose";
   // No math anywhere in it — a phrase like "the power rule".
   if (!MATH_SIGNAL.test(text)) return "prose";
-  if (LABEL.test(text)) return "prose";
+  if (isLabel(text)) return "prose";
   return PROSE_RUN.test(withoutMath(text)) ? "prose" : "math";
 }
 
