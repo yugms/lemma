@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Loader2, Minus, Plus, Sparkles } from "lucide-react";
 import { BuildStatus, useBuildRun } from "@/components/build-run";
+import { DifficultyPicker } from "@/components/difficulty-picker";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 import {
   PROBLEM_FORMATS,
@@ -110,21 +111,7 @@ export function MaterialReview({
         {/* The note is its own block rather than a wrapping member of the chip
             row: inside the flex it wrapped onto a second line still carrying
             `ml-2`, which read as an indented orphan under the squares. */}
-        <div className="flex flex-wrap items-center gap-2">
-          {[1, 2, 3, 4, 5].map((d) => (
-            <button
-              key={d}
-              type="button"
-              disabled={busy}
-              aria-pressed={d === level}
-              aria-label={`Level ${d} — ${DIFFICULTY_LABELS[d]}`}
-              onClick={() => setLevel(d)}
-              className="chip h-9 w-9 justify-center px-0 font-mono pointer-coarse:h-11 pointer-coarse:w-11"
-            >
-              {d}
-            </button>
-          ))}
-        </div>
+        <DifficultyPicker value={level} onChange={setLevel} disabled={busy} />
         <p className="text-sm leading-relaxed text-muted">
           {DIFFICULTY_LABELS[level]} — {levelNote}
         </p>

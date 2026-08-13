@@ -396,7 +396,7 @@ export function ProblemCard({
                 onClick={() => setChoice(c.id)}
                 onKeyDown={(e) => !inert && onChoiceKeyDown(e, i)}
                 className={clsx(
-                  "group flex w-full items-center gap-4 rounded-[3px] border px-4 py-3.5 text-left transition-all duration-200",
+                  "option-row",
                   isCorrectChoice && "border-ok bg-ok-wash",
                   isWrongPick && "border-bad bg-bad-wash",
                   !marked && isPicked && "border-accent bg-accent-wash",
@@ -409,7 +409,7 @@ export function ProblemCard({
               >
                 <span
                   className={clsx(
-                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] border font-mono text-[11px] transition-colors",
+                    "option-key",
                     isCorrectChoice && "border-ok bg-ok text-paper",
                     isWrongPick && "border-bad bg-bad text-paper",
                     !marked && isPicked && "border-accent bg-accent-solid text-accent-on",
@@ -559,12 +559,9 @@ export function ProblemCard({
 
           {problem.response_kind === "value" && (
             <div className="mt-8">
-              {/* The plot is the question here, so it is shown but not touched.
-                  Full-bleed on a phone all the same — reading a value off a
-                  302px plot is the same task as reading it off a 350px one,
-                  only harder. */}
+              {/* The plot is the question here, so it is shown but not touched. */}
               <div
-                className="-mx-6 overflow-hidden border-y border-line bg-surface sm:mx-0 sm:rounded-[3px] sm:border-x [&>svg]:block"
+                className="plot-frame"
                 dangerouslySetInnerHTML={{ __html: problem.plot_svg ?? "" }}
               />
               <div className="relative mt-4">

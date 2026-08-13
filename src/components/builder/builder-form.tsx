@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from "react";
 import clsx from "clsx";
 import { ChevronDown, Loader2, Minus, Plus, Sparkles, X, Zap } from "lucide-react";
 import { BuildStatus, useBuildRun } from "@/components/build-run";
+import { DifficultyPicker } from "@/components/difficulty-picker";
 import type { CatalogCourse } from "@/lib/catalog";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 // From `kinds` rather than `schemas`: the vocabulary is the same, but importing
@@ -292,20 +293,7 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
 
       <Row label="Difficulty">
         <div className="flex flex-wrap items-center gap-2">
-          {[1, 2, 3, 4, 5].map((d) => (
-            <button
-              key={d}
-              type="button"
-              aria-pressed={d === difficulty}
-              aria-label={`Level ${d} — ${DIFFICULTY_LABELS[d]}`}
-              disabled={busy}
-              onClick={() => setDifficulty(d)}
-              // Fixed square, so the coarse `.chip` padding would fight it.
-              className="chip h-9 w-9 justify-center px-0 font-mono pointer-coarse:h-11 pointer-coarse:w-11"
-            >
-              {d}
-            </button>
-          ))}
+          <DifficultyPicker value={difficulty} onChange={setDifficulty} disabled={busy} />
           <span className="ml-2 text-sm text-muted">{DIFFICULTY_LABELS[difficulty]}</span>
         </div>
       </Row>

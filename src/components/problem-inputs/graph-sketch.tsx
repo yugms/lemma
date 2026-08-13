@@ -89,9 +89,7 @@ export function GraphSketchInput({
         {solutionSvg ? "Your curve" : `Position the ${labels.length} handles`}
       </p>
 
-      {/* Full-bleed on a phone, same as graph-points: the handles and the curve
-          are both easier to place with 48px more to place them in. */}
-      <div className="relative -mx-6 overflow-hidden border-y border-line bg-surface sm:mx-0 sm:rounded-[3px] sm:border-x">
+      <div className="plot-frame relative">
         {/* Not `aria-hidden` — see the same note in `graph-points.tsx`. The
             plot describes the axes and any reference curve; the handles below
             describe the controls. */}
@@ -207,7 +205,7 @@ export function GraphSketchInput({
             The correct curve
           </p>
           <div
-            className="-mx-6 overflow-hidden border-y border-line bg-surface sm:mx-0 sm:rounded-[3px] sm:border-x [&>svg]:block"
+            className="plot-frame"
             dangerouslySetInnerHTML={{ __html: solutionSvg }}
           />
         </div>

@@ -579,6 +579,64 @@
     color: var(--bad);
   }
 
+  /* ── Answer options ───────────────────────────────────────────── */
+
+  /* One selectable option, and the lettered chip that opens it. Both were
+     written out as utility stacks in every format that offers a lettered
+     choice — the chip five times — and every one of those stacks is followed
+     by the correct/wrong/picked border and background utilities, which is the
+     part that legitimately differs. Only the geometry lives here. */
+  .option-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0.875rem 1rem;
+    text-align: left;
+    transition: all 200ms;
+  }
+  .option-key {
+    display: flex;
+    height: 1.5rem;
+    width: 1.5rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 2px;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--fg-muted);
+    transition:
+      color 200ms,
+      background-color 200ms,
+      border-color 200ms;
+  }
+
+  /* A server-rendered plot, full-bleed against the card's padding on a phone.
+     48px of extra width is 14% more space between lattice points, which is the
+     only lever that makes the click targets bigger without making them
+     ambiguous — so every plot in the app is framed this way, and the interactive
+     overlays are positioned against it. */
+  .plot-frame {
+    margin-inline: -1.5rem;
+    overflow: hidden;
+    border-block: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .plot-frame > svg {
+    display: block;
+  }
+  @media (min-width: 40rem) {
+    .plot-frame {
+      margin-inline: 0;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+    }
+  }
+
   .badge {
     display: inline-flex;
     align-items: center;
