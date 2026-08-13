@@ -329,6 +329,33 @@ export async function* buildProblemSet(
     lastCount = chosen.length;
   };
 
+  /**
+   * Saving a batch may fail without taking the build with it.
+   *
+   * `insertProblems` throws, and both call sites sit outside the generation
+   * round's own try, so one transient Postgres error discarded the pool and
+   * template problems already in hand — and the route forwards `err.message`,
+   * so the student read the driver's. Everything else here degrades: a capacity
+   * failure keeps the batches that landed beside it, a failed check discards
+   * one problem. A write is not the exception.
+   *
+   * `saveFailed` is tracked rather than inferred from an empty return, because
+   * "written but not saved" is a third way to end with nothing and the copy for
+   * the other two blames either the model or the student's settings.
+   */
+  let saveFailed = false;
+  const saveProblems = async (rows: NewProblemRow[]) => {
+    try {
+      return await insertProblems(db, rows);
+    } catch (err) {
+      saveFailed = true;
+      console.error(
+        `[lemma/build] save failed: ${err instanceof Error ? err.message : "unknown error"}`
+      );
+      return [];
+    }
+  };
+
   // --- 1. pool reuse ---
   yield { type: "status", message: "Checking the problem pool..." };
   const { data: recent } = await db
@@ -419,7 +446,7 @@ export async function* buildProblemSet(
           })
         );
       }
-      const inserted = await insertProblems(db, rows);
+      const inserted = await saveProblems(rows);
       for (const row of inserted) {
         chosen.push({ problemId: row.id, statement: row.statement });
         done++;
@@ -565,7 +592,7 @@ export async function* buildProblemSet(
           config.material?.id
         )
       );
-    const inserted = await insertProblems(db, rows);
+    const inserted = await saveProblems(rows);
     for (const row of inserted) {
       if (chosen.length >= count) break;
       chosen.push({ problemId: row.id, statement: row.statement });
@@ -589,13 +616,12 @@ export async function* buildProblemSet(
     // Naming the right one matters: "try different settings" is useless advice
     // when the settings were fine and the writer was simply unreachable, and it
     // was the only thing this said for either case.
-    yield {
-      type: "error",
-      message:
-        authored === 0
-          ? "The AI writer is busy right now, so nothing could be written for this set. Try again in a minute."
-          : "Could not generate any problems that passed verification. Try different settings.",
-    };
+    const reason = saveFailed
+      ? "The problems were written but could not be saved. Try again in a minute."
+      : authored === 0
+        ? "The AI writer is busy right now, so nothing could be written for this set. Try again in a minute."
+        : "Could not generate any problems that passed verification. Try different settings.";
+    yield { type: "error", message: reason };
     return;
   }
 
