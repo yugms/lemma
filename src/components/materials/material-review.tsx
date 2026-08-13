@@ -7,6 +7,7 @@ import { streamBuild } from "@/lib/build-stream";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 import {
   PROBLEM_FORMATS,
+  clampDifficulty,
   PROBLEM_STYLES,
   type ProblemFormat,
   type ProblemStyle,
@@ -31,7 +32,7 @@ type Progress = { message: string; done: number; total: number };
 
 /** Where the requested shift lands, clamped to the levels that exist. */
 const shifted = (level: number, shift: MaterialReviewProps["shift"]) =>
-  Math.min(5, Math.max(1, level + (shift === "harder" ? 1 : shift === "easier" ? -1 : 0)));
+  clampDifficulty(level + (shift === "harder" ? 1 : shift === "easier" ? -1 : 0));
 
 /**
  * Confirm what was found in the material, then build from it.

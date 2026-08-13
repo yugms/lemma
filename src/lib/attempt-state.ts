@@ -76,3 +76,17 @@ export function retryEligible(
 export function shouldDisclose(eligible: boolean): boolean {
   return !eligible;
 }
+
+/**
+ * How long a topic may go unpractised before it counts as stale.
+ *
+ * Shared because Stats and Review each decide "due" from it and must agree —
+ * a student cannot be told a topic is due on one page and current on the
+ * other. They deliberately reach that answer by different queries (see
+ * `loadDueTopics`, which explains at length why it does not go through
+ * `loadStatsSnapshot`); it is only the threshold that has to be one number.
+ */
+export const STALE_DAYS = 14;
+
+/** The instant before which an attempt no longer counts as recent practice. */
+export const staleBefore = (now: number) => now - STALE_DAYS * 86_400_000;

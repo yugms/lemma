@@ -3,6 +3,7 @@ import type { SetConfig } from "@/lib/sets";
 import type { CoachRead } from "@/lib/ai/schemas";
 import type { ProblemFormat, ProblemStyle } from "@/lib/ai/schemas";
 import { DIFFICULTY_LABELS, formatLabel } from "@/lib/format";
+import { clampDifficulty } from "@/lib/ai/kinds";
 
 /**
  * Turning a practice record into a set the builder's controls couldn't express.
@@ -33,8 +34,6 @@ export type Prescription = PrescriptionView & { config: SetConfig };
 
 const COUNT = 8;
 const MAX_TOPICS = 3;
-
-const clampDifficulty = (d: number) => Math.min(5, Math.max(1, Math.round(d)));
 
 /** The level a group of topics is actually being practised at. */
 function levelOf(topics: TopicStat[]): number {

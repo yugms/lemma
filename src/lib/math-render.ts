@@ -1,6 +1,7 @@
 import katex from "katex";
 import type { PreparedProblem, SanitizedProblem } from "@/lib/ai/schemas";
 import { plotFromSpec, renderPlot } from "@/lib/plot";
+import { escapeMarkup } from "@/lib/escape-markup";
 
 /**
  * Server-side math rendering.
@@ -11,23 +12,6 @@ import { plotFromSpec, renderPlot } from "@/lib/plot";
  * crosses to the browser. `src/components/latex.tsx` holds the client-safe
  * counterparts that inject that markup.
  */
-
-const HTML_ESCAPES: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-/**
- * Prose segments used to be React text nodes, which React escaped for us.
- * Now that they are concatenated into a string, escaping is ours to do —
- * problem statements are model-authored, so this is load-bearing.
- */
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
-}
 
 /** Render a raw LaTeX string (no delimiters) to KaTeX HTML. */
 export function renderMath(latex: string, display = false): string {
@@ -46,7 +30,7 @@ export function renderMath(latex: string, display = false): string {
     });
   } catch {
     // A broken expression should still read as its source, not vanish.
-    return escapeHtml(latex);
+    return escapeMarkup(latex);
   }
 }
 
@@ -99,7 +83,7 @@ export function renderProse(raw: string): string {
   let m: RegExpExecArray | null;
 
   while ((m = regex.exec(text)) !== null) {
-    if (m.index > last) out += escapeHtml(text.slice(last, m.index));
+    if (m.index > last) out += escapeMarkup(text.slice(last, m.index));
     if (m[1] !== undefined) {
       out += renderMath(m[1]);
     } else if (m[2] !== undefined) {
@@ -109,13 +93,13 @@ export function renderProse(raw: string): string {
       // falls back. A wide equation that escapes both scrolls the document.
       out += `<span class="my-3 block overflow-x-auto text-center">${renderMath(m[2], true)}</span>`;
     } else if (m[3] !== undefined) {
-      out += `<span class="mx-1 inline-flex min-w-14 items-center justify-center border-b border-line-strong px-2 font-mono text-xs text-faint">${escapeHtml(m[3])}</span>`;
+      out += `<span class="mx-1 inline-flex min-w-14 items-center justify-center border-b border-line-strong px-2 font-mono text-xs text-faint">${escapeMarkup(m[3])}</span>`;
     } else {
       out += renderMath(m[4].trim());
     }
     last = regex.lastIndex;
   }
-  if (last < text.length) out += escapeHtml(text.slice(last));
+  if (last < text.length) out += escapeMarkup(text.slice(last));
   return out;
 }
 

@@ -21,6 +21,7 @@ import { asyncQueue } from "@/lib/async-queue";
 import { instantiate, templatesFor } from "@/lib/templates";
 import { capFor, CAP_CHECK_FAILED, startOfToday } from "@/lib/limits";
 import { MAX_SET_COUNT } from "@/lib/set-size";
+import { clampDifficulty } from "@/lib/ai/kinds";
 
 
 export type SetConfig = {
@@ -214,7 +215,7 @@ export function rowFromGenerated(
     topic_id: topicId,
     style: p.style,
     format: p.format,
-    difficulty: Math.min(5, Math.max(1, Math.round(p.difficulty))),
+    difficulty: clampDifficulty(p.difficulty),
     content,
     answer,
     explanation,

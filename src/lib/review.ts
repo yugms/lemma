@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
-import { SCORED_MODES } from "@/lib/attempt-state";
+import { SCORED_MODES, staleBefore } from "@/lib/attempt-state";
 import { capFor, CAP_CHECK_FAILED, startOfToday } from "@/lib/limits";
 import { newShareCode } from "@/lib/share-code";
 import type { ProblemFormat } from "@/lib/ai/schemas";
@@ -180,7 +180,6 @@ export type DueTopic = {
   lastAt: string;
 };
 
-const STALE_DAYS = 14;
 const DUE_ROW_LIMIT = 2000;
 
 /**
@@ -256,9 +255,9 @@ export async function loadDueTopics(
     if (r.created_at > acc.lastAt) acc.lastAt = r.created_at;
   }
 
-  const staleBefore = now - STALE_DAYS * 86_400_000;
+  const cutoff = staleBefore(now);
   const due = [...byTopic.values()]
-    .filter((t) => new Date(t.lastAt).getTime() < staleBefore)
+    .filter((t) => new Date(t.lastAt).getTime() < cutoff)
     .map(({ levels, ...t }) => ({
       ...t,
       // The level they mostly worked it at, so "practise again" resumes there.

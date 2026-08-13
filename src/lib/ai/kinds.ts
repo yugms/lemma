@@ -87,3 +87,22 @@ export type GraphResponseKind = (typeof GRAPH_RESPONSE_KINDS)[number];
 export function assertNeverGraphResponse(x: never): never {
   throw new Error(`Unhandled graph response kind: ${JSON.stringify(x)}`);
 }
+
+/**
+ * A difficulty in range, or the middle of the range when there wasn't a number.
+ *
+ * The 1-5 scale is enforced in four unrelated places — a model's self-reported
+ * level, a coach prescription, a row on its way into `problems`, and the
+ * builder's shift control — and three of them had spelled the same
+ * `Math.min(5, Math.max(1, Math.round(d)))` inline. Changing the scale is
+ * therefore one edit rather than a search.
+ *
+ * The `NaN` fallback is why this is a function and not an expression: it only
+ * matters where the number came from a model, but it costs nothing everywhere
+ * else, and the alternative was one call site quietly having a stricter rule
+ * than the others.
+ */
+export function clampDifficulty(value: number): number {
+  const level = Math.round(value);
+  return Number.isFinite(level) ? Math.min(5, Math.max(1, level)) : 3;
+}
