@@ -20,6 +20,7 @@ import { AI_CONCURRENCY, createCallPool } from "@/lib/ai/provider";
 import { asyncQueue } from "@/lib/async-queue";
 import { instantiate, templatesFor } from "@/lib/templates";
 import { capFor, CAP_CHECK_FAILED, startOfToday } from "@/lib/limits";
+import { MAX_SET_COUNT } from "@/lib/set-size";
 
 
 export type SetConfig = {
@@ -66,7 +67,6 @@ export type BuildEvent =
   | { type: "error"; message: string };
 
 const POOL_FRACTION = 0.5;
-const MAX_COUNT = 15;
 /** Headroom under the route's 300s `maxDuration`, counted from the request. */
 export const BUILD_BUDGET_MS = 230_000;
 
@@ -243,7 +243,7 @@ export async function* buildProblemSet(
   requestStartedAt: number = Date.now()
 ): AsyncGenerator<BuildEvent> {
   const db = createServiceClient();
-  const count = Math.min(Math.max(config.count, 1), MAX_COUNT);
+  const count = Math.min(Math.max(config.count, 1), MAX_SET_COUNT);
 
   // --- daily cap ---
   // Only sets that actually cost a model call count. Review sets and copies of

@@ -10,6 +10,7 @@ import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 // From `kinds` rather than `schemas`: the vocabulary is the same, but importing
 // a value from `schemas` puts the whole zod runtime in this route's bundle.
 import { PROBLEM_FORMATS, type ProblemFormat, type ProblemStyle } from "@/lib/ai/kinds";
+import { MAX_BUILDER_COUNT, MIN_BUILDER_COUNT } from "@/lib/set-size";
 
 /* Labels come from `format.ts` so the builder's controls and the stats
    breakdowns always name the same thing the same way. */
@@ -35,8 +36,6 @@ const FORMAT_HINTS: Record<ProblemFormat, string> = {
   ordering: "Arrange the steps of a method",
 };
 
-const MIN_COUNT = 3;
-const MAX_COUNT = 12;
 const MAX_TOPICS = 6;
 
 type Progress = { done: number; total: number; message: string };
@@ -302,8 +301,8 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
         <div className="flex items-center gap-4">
           <button
             type="button"
-            disabled={busy || count <= MIN_COUNT}
-            onClick={() => setCount((c) => Math.max(MIN_COUNT, c - 1))}
+            disabled={busy || count <= MIN_BUILDER_COUNT}
+            onClick={() => setCount((c) => Math.max(MIN_BUILDER_COUNT, c - 1))}
             aria-label="Fewer problems"
             className="btn btn-outline btn-icon"
           >
@@ -317,8 +316,8 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
           </span>
           <button
             type="button"
-            disabled={busy || count >= MAX_COUNT}
-            onClick={() => setCount((c) => Math.min(MAX_COUNT, c + 1))}
+            disabled={busy || count >= MAX_BUILDER_COUNT}
+            onClick={() => setCount((c) => Math.min(MAX_BUILDER_COUNT, c + 1))}
             aria-label="More problems"
             className="btn btn-outline btn-icon"
           >

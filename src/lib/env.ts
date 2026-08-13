@@ -62,6 +62,16 @@ export function isProduction(): boolean {
 }
 
 /**
+ * Whether this is the dev server specifically.
+ *
+ * Not `!isProduction()`: a test run is neither, and the one caller — the CSP's
+ * dev allowances — must not loosen itself under vitest.
+ */
+export function isDevelopment(): boolean {
+  return process.env.NODE_ENV === "development";
+}
+
+/**
  * Cloudflare Turnstile's public site key, or `null` when not configured.
  *
  * Optional by design, and that is the whole safety property: unset means no
@@ -128,7 +138,7 @@ export function siteUrl(): string {
 
   if (deploymentHost) return `https://${deploymentHost}`;
 
-  if (process.env.NODE_ENV === "production") warnOnce();
+  if (isProduction()) warnOnce();
   return "http://localhost:3000";
 }
 

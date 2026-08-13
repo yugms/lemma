@@ -8,7 +8,8 @@ import { FlashcardEngine } from "@/components/practice/flashcard-engine";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Flashcards",
-  description: "Work through a set unscored, repeating it as often as you like. Nothing here counts toward your record.",
+  description:
+    "Work through a set as often as you like. Reps count toward your topic accuracy, never toward the set's own score.",
 };
 
 export default async function FlashcardsPage({

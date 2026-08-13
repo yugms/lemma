@@ -9,6 +9,7 @@ import { loadLatestSession } from "@/lib/study-session";
 import { prescribe, PLAN_IDS } from "@/lib/coach-plan";
 import { ipAllowance } from "@/lib/limits";
 import { getMaterial } from "@/lib/materials";
+import { MAX_SET_COUNT } from "@/lib/set-size";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -16,7 +17,7 @@ export const maxDuration = 300;
 const ManualSchema = z.object({
   mode: z.literal("manual").optional(),
   topicIds: z.array(z.string().uuid()).min(1).max(6),
-  count: z.number().int().min(1).max(15),
+  count: z.number().int().min(1).max(MAX_SET_COUNT),
   difficulty: z.number().int().min(1).max(5),
   styles: z.array(z.enum(PROBLEM_STYLES)).min(1),
   formats: z.array(z.enum(PROBLEM_FORMATS)).min(1),
@@ -53,7 +54,7 @@ const MaterialSchema = z.object({
   mode: z.literal("material"),
   materialId: z.string().uuid(),
   topicIds: z.array(z.string().uuid()).min(1).max(6),
-  count: z.number().int().min(1).max(15),
+  count: z.number().int().min(1).max(MAX_SET_COUNT),
   difficulty: z.number().int().min(1).max(5),
   styles: z.array(z.enum(PROBLEM_STYLES)).min(1),
   formats: z.array(z.enum(PROBLEM_FORMATS)).min(1),

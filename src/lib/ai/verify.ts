@@ -538,7 +538,7 @@ export async function solverAgrees(
         if (sn !== null && tn !== null) return numbersEqual(sn, tn, p.answer.tolerance);
         // Reading a value off a plot is usually numeric, so this rarely fires —
         // but when it doesn't parse, the answer is prose and deserves the ask.
-        return res !== "incorrect" && meansTheSame(s.final_answer_latex, p.answer);
+        return res !== "incorrect" && (await meansTheSame(s.final_answer_latex, p.answer));
       }
       case "points":
         // Tolerant here, exact at grading time: the solver is being asked to

@@ -11,9 +11,8 @@ import {
   type ProblemFormat,
   type ProblemStyle,
 } from "@/lib/ai/kinds";
+import { MAX_BUILDER_COUNT, MIN_BUILDER_COUNT } from "@/lib/set-size";
 
-const MIN_COUNT = 4;
-const MAX_COUNT = 12;
 
 export type ReviewTopic = { id: string; title: string; unit: string | null };
 
@@ -208,8 +207,8 @@ export function MaterialReview({
         <div className="flex items-center gap-4">
           <button
             type="button"
-            disabled={busy || count <= MIN_COUNT}
-            onClick={() => setCount((c) => Math.max(MIN_COUNT, c - 1))}
+            disabled={busy || count <= MIN_BUILDER_COUNT}
+            onClick={() => setCount((c) => Math.max(MIN_BUILDER_COUNT, c - 1))}
             aria-label="Fewer problems"
             className="btn btn-outline btn-icon"
           >
@@ -220,8 +219,8 @@ export function MaterialReview({
           </span>
           <button
             type="button"
-            disabled={busy || count >= MAX_COUNT}
-            onClick={() => setCount((c) => Math.min(MAX_COUNT, c + 1))}
+            disabled={busy || count >= MAX_BUILDER_COUNT}
+            onClick={() => setCount((c) => Math.min(MAX_BUILDER_COUNT, c + 1))}
             aria-label="More problems"
             className="btn btn-outline btn-icon"
           >
