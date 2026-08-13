@@ -162,6 +162,20 @@ describe("structuralCheck agrees with the renderer", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("still rejects two labels that differ only by spacing", () => {
+    // `normalizeMath` strips whitespace, so these collided while they were
+    // being classified as math. Reading them as prose has to keep catching it.
+    const result = structuralCheck(
+      selectAll([
+        { id: "A", latex: "Step 1" },
+        { id: "B", latex: "Step  1" },
+        { id: "C", latex: "Step 3" },
+        { id: "D", latex: "Step 4" },
+      ])
+    );
+    expect(result.ok).toBe(false);
+  });
+
   it("classifies every shape the checker and renderer share", () => {
     expect(inlineShape("\\frac{5}{8}")).toBe("math");
     expect(inlineShape("The portion who play is \\frac{7}{25}.")).toBe("prose");

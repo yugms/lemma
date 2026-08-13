@@ -79,8 +79,15 @@ export function structuralCheck(p: GeneratedProblem): { ok: boolean; reason?: st
     // Prose is compared as written. `normalizeMath` exists to decide whether
     // two *expressions* are the same answer, and putting sentences through it
     // is as likely to collide two distinct statements as to catch a repeat.
+    //
+    // Runs of whitespace still collapse, because `normalizeMath` removes
+    // whitespace outright: every fragment that moves between these two branches
+    // — a label like `Step 1` did — would otherwise quietly stop being checked
+    // against its neighbour spelled with one more space.
     const normalized = options.map((o) =>
-      inlineShape(o.latex) === "math" ? normalizeMath(o.latex) : o.latex.trim().toLowerCase()
+      inlineShape(o.latex) === "math"
+        ? normalizeMath(o.latex)
+        : o.latex.trim().toLowerCase().replace(/\s+/g, " ")
     );
     if (new Set(normalized).size !== normalized.length)
       return { ok: false, reason: `duplicate ${noun} values` };
