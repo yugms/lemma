@@ -5,8 +5,14 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { checkSubmission, wrongAnswerFeedback } from "@/lib/ai/check-answer";
 import { renderInline, renderMath, renderProse } from "@/lib/math-render";
 import { curveFromAuthored, plotFromSpec, renderPlot } from "@/lib/plot";
-import { assertNeverFormat } from "@/lib/ai/schemas";
-import { ATTEMPT_MODES, MODE_RULES, retryEligible, shouldDisclose } from "@/lib/attempt-state";
+import { assertNeverFormat } from "@/lib/ai/kinds";
+import {
+  ATTEMPT_MODES,
+  MAX_TIME_MS,
+  MODE_RULES,
+  retryEligible,
+  shouldDisclose,
+} from "@/lib/attempt-state";
 import { aiGradingAllowed } from "@/lib/limits";
 import type {
   CheckResponse,
@@ -31,7 +37,7 @@ const BodySchema = z.object({
    */
   action: z.enum(["answer", "reveal", "recall", "retry"]),
   answer: z.unknown().optional(),
-  timeMs: z.number().int().min(0).max(3_600_000).optional(),
+  timeMs: z.number().int().min(0).max(MAX_TIME_MS).optional(),
 });
 
 type PriorAttempt = {

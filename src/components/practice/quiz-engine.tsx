@@ -7,10 +7,9 @@ import { ArrowLeft, ArrowRight, Flag, Loader2, Timer } from "lucide-react";
 import { ProblemCard } from "@/components/problem-card";
 import { EmptySet } from "@/components/practice/empty-set";
 import { ProblemRail } from "@/components/practice/problem-rail";
+import { MAX_TIME_MS } from "@/lib/attempt-state";
 import { formatDuration } from "@/lib/format";
 import type { PreparedProblem } from "@/lib/ai/schemas";
-
-const MAX_TIME_MS = 3_600_000;
 
 /**
  * A quiz over a set: the same problems, under exam conditions.

@@ -4,10 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, RotateCcw, Shuffle, X } from "lucide-react";
 import { ProblemCard } from "@/components/problem-card";
+import { MAX_TIME_MS } from "@/lib/attempt-state";
 import { postJson } from "@/lib/post-json";
 import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
-
-const MAX_TIME_MS = 3_600_000;
 
 /**
  * Rapid recall over a set's problems.

@@ -106,3 +106,16 @@ export function clampDifficulty(value: number): number {
   const level = Math.round(value);
   return Number.isFinite(level) ? Math.min(5, Math.max(1, level)) : 3;
 }
+
+/**
+ * Option letters, in the two lengths the app uses.
+ *
+ * `mcq` offers up to five so a printed sheet keeps one line per option;
+ * `multi_select`, `matching` and `ordering` go to six. Both were spelled out
+ * as literals in the schemas, in the template helpers, and again wherever a
+ * letter had to be assigned — and a list that disagrees with its schema is a
+ * problem the model authors and validation then discards.
+ */
+export const MCQ_CHOICE_IDS = ["A", "B", "C", "D", "E"] as const;
+export const CHOICE_IDS = [...MCQ_CHOICE_IDS, "F"] as const;
+export type ChoiceId = (typeof CHOICE_IDS)[number];

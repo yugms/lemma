@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { ChevronDown, Loader2, Minus, Plus, Sparkles, X, Zap } from "lucide-react";
 import { BuildStatus, useBuildRun } from "@/components/build-run";
 import { DifficultyPicker } from "@/components/difficulty-picker";
+import { SPEC_ROW } from "@/components/skeletons";
 import type { CatalogCourse } from "@/lib/catalog";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 // From `kinds` rather than `schemas`: the vocabulary is the same, but importing
@@ -53,7 +54,7 @@ function Row({
     <section
       role="group"
       aria-labelledby={id}
-      className="grid gap-4 border-b border-line py-8 sm:grid-cols-[8.5rem_1fr] sm:gap-10"
+      className={SPEC_ROW}
     >
       <div className="flex items-baseline justify-between gap-3 sm:block">
         <h2 id={id} className="eyebrow">
@@ -309,11 +310,11 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
                 aria-pressed={on}
                 disabled={busy}
                 onClick={() => toggle(styles, s.id, setStyles, 1)}
-                className="group flex w-full items-start gap-4 rounded-[3px] py-2.5 text-left disabled:opacity-50"
+                className="group flex w-full items-start gap-4 rounded-sm py-2.5 text-left disabled:opacity-50"
               >
                 <span
                   className={clsx(
-                    "mt-[3px] h-3.5 w-3.5 shrink-0 rounded-[2px] border transition-colors",
+                    "mt-[3px] h-3.5 w-3.5 shrink-0 rounded-xs border transition-colors",
                     on
                       ? "border-accent bg-accent-solid"
                       : "border-line-strong bg-surface group-hover:border-accent"

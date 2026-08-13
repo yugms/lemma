@@ -49,7 +49,7 @@ export function MatchingInput({
               <li
                 key={l.id}
                 className={clsx(
-                  "flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[3px] border px-4 py-3.5 transition-colors",
+                  "flex flex-wrap items-center gap-x-4 gap-y-3 rounded-sm border px-4 py-3.5 transition-colors",
                   isRight === true && "border-ok bg-ok-wash",
                   isRight === false && "border-bad bg-bad-wash",
                   isRight === null && "border-line"
@@ -107,7 +107,7 @@ export function MatchingInput({
         <p className="mono-meta mb-3">Choose from</p>
         <ul className="grid gap-2 sm:grid-cols-2">
           {right.map((r) => (
-            <li key={r.id} className="flex items-center gap-3 rounded-[3px] border border-line px-3 py-2.5">
+            <li key={r.id} className="flex items-center gap-3 rounded-sm border border-line px-3 py-2.5">
               <span className="option-key">
                 {r.id}
               </span>

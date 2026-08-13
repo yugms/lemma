@@ -8,16 +8,13 @@ import { ProblemCard } from "@/components/problem-card";
 import { Prose } from "@/components/latex";
 import { EmptySet } from "@/components/practice/empty-set";
 import { ProblemRail } from "@/components/practice/problem-rail";
+import { MAX_TIME_MS } from "@/lib/attempt-state";
 import { formatDuration } from "@/lib/format";
 import { postJson } from "@/lib/post-json";
 import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
 import type { Outcome } from "@/lib/progress";
 
 type Outcomes = Record<string, Outcome>;
-
-/** `/api/check` rejects anything larger, and a tab left open all afternoon
- *  would otherwise 400 the submission rather than grade it. */
-const MAX_TIME_MS = 3_600_000;
 
 /**
  * Outcome colours own this component. "Current" is deliberately ink rather
@@ -314,7 +311,7 @@ export function PracticeEngine({
                   <button
                     type="button"
                     onClick={() => go(i)}
-                    className="group flex w-full items-center gap-4 rounded-[3px] border border-line px-4 py-3 text-left transition-colors hover:border-accent-line hover:bg-surface"
+                    className="group flex w-full items-center gap-4 rounded-sm border border-line px-4 py-3 text-left transition-colors hover:border-accent-line hover:bg-surface"
                   >
                     <span className="mono-meta w-6 shrink-0">
                       {String(i + 1).padStart(2, "0")}

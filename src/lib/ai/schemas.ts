@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   assertNeverFormat,
   formatForKind,
+  CHOICE_IDS,
   GRAPH_RESPONSE_KINDS,
+  MCQ_CHOICE_IDS,
   type GenerationKind,
   type GraphResponseKind,
   type ProblemFormat,
@@ -27,6 +29,7 @@ import {
 export {
   assertNeverFormat,
   assertNeverGraphResponse,
+  CHOICE_IDS,
   formatForKind,
   GENERATION_KINDS,
   GRAPH_RESPONSE_KINDS,
@@ -35,6 +38,7 @@ export {
   PROBLEM_STYLES,
 } from "@/lib/ai/kinds";
 export type {
+  ChoiceId,
   GenerationKind,
   GraphResponseKind,
   ProblemFormat,
@@ -53,8 +57,6 @@ export function kindOf(p: GeneratedProblem): GenerationKind {
     : (p.format as GenerationKind);
 }
 
-const CHOICE_IDS = ["A", "B", "C", "D", "E", "F"] as const;
-export type ChoiceId = (typeof CHOICE_IDS)[number];
 
 /**
  * Right-hand ids for `matching`. Digits rather than more letters so a pair
@@ -113,15 +115,15 @@ const McqProblemSchema = z.object({
   ...baseFields,
   format: z.literal("mcq"),
   choices: z
-    .array(z.object({ id: z.enum(["A", "B", "C", "D", "E"]), latex: z.string() }))
+    .array(z.object({ id: z.enum(MCQ_CHOICE_IDS), latex: z.string() }))
     .describe(
       "4-5 answer choices. A bare LaTeX expression when the choice is one, e.g. \\frac{3}{8}. If a choice is a sentence, write prose and wrap the math in \\( \\)"
     ),
-  correct_choice_id: z.enum(["A", "B", "C", "D", "E"]),
+  correct_choice_id: z.enum(MCQ_CHOICE_IDS),
   distractor_rationales: z
     .array(
       z.object({
-        choice_id: z.enum(["A", "B", "C", "D", "E"]),
+        choice_id: z.enum(MCQ_CHOICE_IDS),
         misconception: z.string().describe("The specific error that leads to this wrong choice"),
       })
     )

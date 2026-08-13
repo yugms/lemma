@@ -168,7 +168,7 @@ export default async function RootLayout({
       <body className="flex min-h-dvh flex-col">
         <a
           href="#main"
-          className="sr-only z-50 focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:rounded-[3px] focus:bg-accent-solid focus:px-4 focus:py-2 focus:text-sm focus:text-accent-on"
+          className="sr-only z-50 focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:rounded-sm focus:bg-accent-solid focus:px-4 focus:py-2 focus:text-sm focus:text-accent-on"
         >
           Skip to content
         </a>

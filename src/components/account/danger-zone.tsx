@@ -161,7 +161,7 @@ export function DangerZone({
           <section
             key={action.id}
             className={clsx(
-              "rounded-[3px] border px-5 py-5 transition-colors",
+              "rounded-sm border px-5 py-5 transition-colors",
               isOpen ? "border-bad" : "border-line"
             )}
           >

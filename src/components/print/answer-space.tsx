@@ -1,9 +1,6 @@
 import { Prose } from "@/components/latex";
-import {
-  assertNeverFormat,
-  assertNeverGraphResponse,
-  type PreparedProblem,
-} from "@/lib/ai/schemas";
+import { assertNeverFormat, assertNeverGraphResponse } from "@/lib/ai/kinds";
+import type { PreparedProblem } from "@/lib/ai/schemas";
 
 /**
  * Where the student writes, sized to the format.

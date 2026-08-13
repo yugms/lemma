@@ -1,4 +1,4 @@
-import { LoadingAnnouncement, PageHeaderSkeleton } from "@/components/skeletons";
+import { LoadingAnnouncement, PageHeaderSkeleton, SPEC_ROW } from "@/components/skeletons";
 
 export default function Loading() {
   return (
@@ -7,10 +7,7 @@ export default function Loading() {
       <PageHeaderSkeleton wide />
       <div className="border-t border-line">
         {Array.from({ length: 5 }, (_, i) => (
-          <div
-            key={i}
-            className="grid gap-4 border-b border-line py-8 sm:grid-cols-[8.5rem_1fr] sm:gap-10"
-          >
+          <div key={i} className={SPEC_ROW}>
             <div className="skeleton h-2.5 w-20" />
             <div className="flex flex-wrap gap-2">
               {Array.from({ length: 4 }, (_, j) => (

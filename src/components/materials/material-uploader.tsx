@@ -117,7 +117,7 @@ export function MaterialUploader() {
             {files.map((f, i) => (
               <li
                 key={`${f.name}-${i}`}
-                className="flex items-center gap-3 rounded-[3px] border border-line px-3 py-2.5"
+                className="flex items-center gap-3 rounded-sm border border-line px-3 py-2.5"
               >
                 <FileText className="h-3.5 w-3.5 shrink-0 text-faint" aria-hidden />
                 <span className="min-w-0 flex-1 truncate text-sm">{f.name}</span>
