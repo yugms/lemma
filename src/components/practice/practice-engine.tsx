@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, Check, Eye, Flag, RotateCcw, X } from "lucide-re
 import { ProblemCard } from "@/components/problem-card";
 import { Prose } from "@/components/latex";
 import { EmptySet } from "@/components/practice/empty-set";
+import { ProblemRail } from "@/components/practice/problem-rail";
 import { formatDuration } from "@/lib/format";
 import { postJson } from "@/lib/post-json";
 import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
@@ -394,37 +395,15 @@ export function PracticeEngine({
           <span className="truncate">{set.title}</span>
         </Link>
 
-        {/* A set runs to MAX_COUNT = 15 (src/lib/sets.ts), which at the old
-            `w-5 shrink-0` needed ~371px of un-shrinkable rail beside a title
-            in a 335px box. It scrolls instead, and the pitch is 24px so
-            adjacent targets are tangent rather than overlapping — the `sm:w-6`
-            was backwards, widening the dots on the screen that had room. */}
-        <nav
-          aria-label="Problems"
-          className="-mr-5 flex max-w-[55%] shrink-0 gap-1 overflow-x-auto pr-5 [scrollbar-width:none] sm:mr-0 sm:max-w-none sm:overflow-visible sm:pr-0"
-        >
-          {problems.map((p, i) => {
+        <ProblemRail
+          noun="Problem"
+          stops={problems.map((p, i) => {
             const tone = toneFor(outcomes[p.id], i === current);
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => go(i)}
-                aria-current={i === current ? "step" : undefined}
-                aria-label={`Problem ${i + 1}, ${tone.label}`}
-                className="group -my-2 shrink-0 px-1 py-3"
-              >
-                <span
-                  className={clsx(
-                    "block h-[3px] w-4 rounded-full transition-all duration-300 group-hover:h-[5px] sm:w-6",
-                    tone.className,
-                    i === current && "h-[5px]"
-                  )}
-                />
-              </button>
-            );
+            return { key: p.id, tone: tone.className, state: tone.label };
           })}
-        </nav>
+          current={current}
+          onGo={go}
+        />
       </div>
 
       <h1 ref={headingRef} tabIndex={-1} className="sr-only outline-none">

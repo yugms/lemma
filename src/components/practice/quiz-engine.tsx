@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { ArrowLeft, ArrowRight, Flag, Loader2, Timer } from "lucide-react";
 import { ProblemCard } from "@/components/problem-card";
 import { EmptySet } from "@/components/practice/empty-set";
+import { ProblemRail } from "@/components/practice/problem-rail";
 import { formatDuration } from "@/lib/format";
 import type { PreparedProblem } from "@/lib/ai/schemas";
 
@@ -124,31 +125,16 @@ export function QuizEngine({
           <span className="truncate text-faint">· {set.title}</span>
         </span>
 
-        {/* Scrolls rather than overflowing — see the note in
-            practice-engine.tsx, which carries the same rail. */}
-        <nav
-          aria-label="Questions"
-          className="-mr-5 flex max-w-[55%] shrink-0 gap-1 overflow-x-auto pr-5 [scrollbar-width:none] sm:mr-0 sm:max-w-none sm:overflow-visible sm:pr-0"
-        >
-          {problems.map((p, i) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => go(i)}
-              aria-current={i === current ? "step" : undefined}
-              aria-label={`Question ${i + 1}, ${answered[p.id] ? "answered" : "unanswered"}`}
-              className="group -my-2 shrink-0 px-1 py-3"
-            >
-              <span
-                className={clsx(
-                  "block h-[3px] w-4 rounded-full transition-all duration-300 group-hover:h-[5px] sm:w-6",
-                  answered[p.id] ? "bg-fg" : "bg-line",
-                  i === current && "h-[5px]"
-                )}
-              />
-            </button>
-          ))}
-        </nav>
+        <ProblemRail
+          noun="Question"
+          stops={problems.map((p) => ({
+            key: p.id,
+            tone: answered[p.id] ? "bg-fg" : "bg-line",
+            state: answered[p.id] ? "answered" : "unanswered",
+          }))}
+          current={current}
+          onGo={go}
+        />
       </div>
 
       <h1 ref={headingRef} tabIndex={-1} className="sr-only outline-none">
