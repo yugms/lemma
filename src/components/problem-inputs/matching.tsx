@@ -34,7 +34,6 @@ export function MatchingInput({
   graded?: { left_id: string; right_id: string }[];
 }) {
   const truth = graded ? new Map(graded.map((p) => [p.left_id, p.right_id])) : null;
-  const rightLabel = new Map(right.map((r) => [r.id, r.html]));
 
   return (
     <div className="mt-8 space-y-6">
@@ -112,7 +111,7 @@ export function MatchingInput({
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] border border-line-strong font-mono text-[11px] text-muted">
                 {r.id}
               </span>
-              <Math html={rightLabel.get(r.id) ?? ""} className="min-w-0 flex-1" />
+              <Math html={r.html} className="min-w-0 flex-1" />
             </li>
           ))}
         </ul>

@@ -70,7 +70,6 @@ export default async function SetsPage() {
         r.problem_set_items?.[0]?.count ?? r.config.delivered ?? r.config.count ?? 0,
       difficulty: r.config.difficulty ?? 1,
       attempted: tally?.attempted ?? 0,
-      correct: tally?.correct ?? 0,
     };
   });
 

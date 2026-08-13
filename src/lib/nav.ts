@@ -14,8 +14,6 @@ export const NAV = [
   { href: "/stats", label: "Stats", requiresAccount: true },
 ] as const;
 
-export type NavItem = (typeof NAV)[number];
-
 /**
  * Routes that run their own bottom action bar.
  *

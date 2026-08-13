@@ -18,7 +18,6 @@ export type SetRowData = {
   total: number;
   difficulty: number;
   attempted: number;
-  correct: number;
 };
 
 export function SetRow({ set }: { set: SetRowData }) {

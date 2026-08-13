@@ -324,12 +324,9 @@ export function ProblemCard({
     (group?.children[next] as HTMLElement | undefined)?.focus();
   }
 
-  const verdictTone = result?.revealed ? "revealed" : result?.correct ? "ok" : "bad";
-  /**
-   * Show correctness marks only when the attempt is settled. While a retry is
-   * live the inputs are the student's again, and while one is merely offered
-   * the answer key hasn't been sent — `result.answer` is deliberately absent.
-   */
+  // Only ever read inside `{!result.revealed && …}` — a revealed answer gets its
+  // own region further down and never consults this.
+  const verdictTone = result?.correct ? "ok" : "bad";
   /**
    * Whether the inputs may show a verdict on themselves.
    *

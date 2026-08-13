@@ -607,6 +607,7 @@ export async function solverGates(
   p: GeneratedProblem,
   solver: SolverResult,
   requestedDifficulty: number,
+  /** Injected by the tests so the gates can be exercised without a model call. */
   equivalent?: EquivalenceCheck
 ): Promise<string | null> {
   if (!solver.is_well_posed && !flawIsThePoint(p))

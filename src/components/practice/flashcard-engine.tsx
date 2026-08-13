@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import clsx from "clsx";
 import { ArrowLeft, Check, RotateCcw, Shuffle, X } from "lucide-react";
 import { ProblemCard } from "@/components/problem-card";
 import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
@@ -186,7 +185,7 @@ export function FlashcardEngine({
 
       {result && (
         <div className="mt-6 flex justify-end">
-          <button type="button" onClick={next} className={clsx("btn btn-accent")}>
+          <button type="button" onClick={next} className="btn btn-accent">
             {last ? "Finish deck" : "Next card"}
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
           </button>
