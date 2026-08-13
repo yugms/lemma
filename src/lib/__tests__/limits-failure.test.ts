@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * What the caps do when they cannot count.
  *
- * Separate from `production.test.ts` because `vi.mock` is hoisted to the whole
+ * Separate from `limits.test.ts` because `vi.mock` is hoisted to the whole
  * file, and that file asserts against the real modules.
  *
  * The bug being pinned here shipped and was invisible: every cap read
