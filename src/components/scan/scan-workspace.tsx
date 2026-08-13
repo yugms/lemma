@@ -3,6 +3,7 @@
 import { useState } from "react";
 import clsx from "clsx";
 import { Camera, Check, HelpCircle, Loader2, Minus, Upload, X } from "lucide-react";
+import { uploadToBucket } from "@/lib/bucket-upload";
 import { postJson } from "@/lib/post-json";
 import { wasAttempted } from "@/lib/scan-marks";
 import type { ScanMark } from "@/lib/ai/grade-scan";
@@ -66,30 +67,7 @@ export function ScanWorkspace({
     setPhase("uploading");
     setError(null);
     try {
-      const [{ createClient }, { ensureUser }] = await Promise.all([
-        import("@/lib/supabase/client"),
-        import("@/lib/auth"),
-      ]);
-      const user = await ensureUser();
-      const supabase = createClient();
-
-      // Uploaded straight from the browser under the caller's own prefix —
-      // that prefix is what the storage policy checks, and it keeps several
-      // megabytes of photo out of the serverless request body.
-      const stamp = crypto.randomUUID();
-      const paths: string[] = [];
-      for (const [i, file] of files.entries()) {
-        const ext = (file.name.split(".").pop() ?? "jpg").toLowerCase();
-        const path = `${user.id}/${stamp}/${i}.${ext}`;
-        // Not upsert: the path carries a fresh uuid so it is unique by
-        // construction, and the bucket has insert/read/delete policies but no
-        // update — an overwrite would fail the policy rather than the check.
-        const { error: upErr } = await supabase.storage
-          .from("worksheet-scans")
-          .upload(path, file, { contentType: file.type });
-        if (upErr) throw new Error("That upload didn't go through — check your connection.");
-        paths.push(path);
-      }
+      const paths = await uploadToBucket("worksheet-scans", files, "jpg");
 
       setPhase("marking");
       const json = await postJson<{ grading: WorksheetGrading; uploadId: string }>(
@@ -145,10 +123,7 @@ export function ScanWorkspace({
               camera is worth keeping as its own button. */}
           <div className="grid gap-3 sm:grid-cols-2">
             <label
-              className={clsx(
-                "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-[3px] border border-dashed px-6 py-12 text-center transition-colors",
-                busy ? "border-line opacity-60" : "border-line-strong hover:border-accent"
-              )}
+              className={clsx("dropzone", busy && "dropzone-busy")}
             >
               <Camera className="h-5 w-5 text-faint" aria-hidden />
               <span className="text-sm text-muted">Take a photo</span>
@@ -164,10 +139,7 @@ export function ScanWorkspace({
             </label>
 
             <label
-              className={clsx(
-                "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-[3px] border border-dashed px-6 py-12 text-center transition-colors",
-                busy ? "border-line opacity-60" : "border-line-strong hover:border-accent"
-              )}
+              className={clsx("dropzone", busy && "dropzone-busy")}
             >
               <Upload className="h-5 w-5 text-faint" aria-hidden />
               <span className="text-sm text-muted">Choose photos</span>

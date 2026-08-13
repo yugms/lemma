@@ -579,6 +579,35 @@
     color: var(--bad);
   }
 
+  /* The "choose a file" target, in both uploaders. The whole thing is a
+     `<label>` wrapping an `sr-only` input, so the hit area is the box rather
+     than a button beside it. */
+  .dropzone {
+    display: flex;
+    cursor: pointer;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    border: 1px dashed var(--line-strong);
+    border-radius: 3px;
+    padding: 3rem 1.5rem;
+    text-align: center;
+    transition:
+      border-color 0.18s ease,
+      opacity 0.18s ease;
+  }
+  .dropzone:hover {
+    border-color: var(--accent);
+  }
+  /* Mid-upload: not disabled — a `<label>` cannot be — so it is dimmed and its
+     input carries the `disabled` that actually stops a second pick. */
+  .dropzone-busy,
+  .dropzone-busy:hover {
+    border-color: var(--line);
+    opacity: 0.6;
+  }
+
   /* ── Answer options ───────────────────────────────────────────── */
 
   /* One selectable option, and the lettered chip that opens it. Both were

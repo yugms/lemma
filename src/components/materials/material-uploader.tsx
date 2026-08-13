@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, Loader2, Sparkles, Upload, X } from "lucide-react";
 import clsx from "clsx";
+import { uploadToBucket } from "@/lib/bucket-upload";
 import { postJson, RequestFailed } from "@/lib/post-json";
 
 /**
@@ -59,26 +60,7 @@ export function MaterialUploader() {
     setError(null);
     setPhase("uploading");
     try {
-      // Loaded at click time, not on mount: the Supabase SDK is the heaviest
-      // dependency on this page and nothing needs it until you upload.
-      const [{ createClient }, { ensureUser }] = await Promise.all([
-        import("@/lib/supabase/client"),
-        import("@/lib/auth"),
-      ]);
-      const user = await ensureUser();
-      const supabase = createClient();
-
-      const stamp = crypto.randomUUID();
-      const paths: string[] = [];
-      for (const [i, file] of files.entries()) {
-        const ext = (file.name.split(".").pop() ?? "bin").toLowerCase();
-        const path = `${user.id}/${stamp}/${i}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from("study-materials")
-          .upload(path, file, { contentType: file.type });
-        if (upErr) throw new Error("That upload didn't go through — check your connection.");
-        paths.push(path);
-      }
+      const paths = await uploadToBucket("study-materials", files);
 
       setPhase("reading");
       const { materialId } = await postJson<{ materialId: string }>(
@@ -111,10 +93,7 @@ export function MaterialUploader() {
     <div className="space-y-9">
       <section>
         <label
-          className={clsx(
-            "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-[3px] border border-dashed px-6 py-12 text-center transition-colors",
-            busy ? "border-line opacity-60" : "border-line-strong hover:border-accent"
-          )}
+          className={clsx("dropzone", busy && "dropzone-busy")}
         >
           <Upload className="h-5 w-5 text-faint" aria-hidden />
           <span className="text-sm text-muted">
