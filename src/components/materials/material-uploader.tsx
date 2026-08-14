@@ -6,6 +6,13 @@ import { FileText, Loader2, Sparkles, Upload, X } from "lucide-react";
 import clsx from "clsx";
 import { uploadToBucket } from "@/lib/bucket-upload";
 import { postJson, RequestFailed } from "@/lib/post-json";
+import {
+  MAX_MATERIAL_FILE_BYTES,
+  MAX_MATERIAL_FILES,
+  MAX_MATERIAL_TOTAL_BYTES,
+  MAX_PASTED_CHARS,
+  MAX_WANT_CHARS,
+} from "@/lib/material-limits";
 
 /**
  * Turn a worksheet, a chapter or a page of notes into something practice can be
@@ -16,16 +23,17 @@ import { postJson, RequestFailed } from "@/lib/post-json";
  * policy's `${userId}/...` prefix is what authorizes the write. The route is
  * then told only which paths to read.
  *
- * These constants are duplicates of the ones in `lib/materials.ts`, which
+ * The caps come from `material-limits.ts` rather than `lib/materials.ts`, which
  * cannot be imported here: that module pulls in the service client, and a
  * client component importing it would ship the service client to the browser.
- * The bucket's own `file_size_limit` is the copy that actually holds.
+ * They were hand-copied for that reason and one copy had already drifted. What
+ * is checked here is a courtesy either way — the bucket's `file_size_limit` and
+ * the reader's own cap are what actually hold.
  */
 const ACCEPTED = "image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf";
-const MAX_FILES = 4;
-const MAX_BYTES = 10 * 1024 * 1024;
-const MAX_PASTED = 20_000;
-const MAX_WANT = 280;
+
+/** So the copy quotes the cap rather than a number that used to match it. */
+const mb = (bytes: number) => Math.round(bytes / (1024 * 1024));
 
 type Phase = "idle" | "uploading" | "reading";
 
@@ -44,16 +52,29 @@ export function MaterialUploader() {
     if (!list) return;
     setError(null);
     const picked = Array.from(list);
-    const tooBig = picked.find((f) => f.size > MAX_BYTES);
+    const tooBig = picked.find((f) => f.size > MAX_MATERIAL_FILE_BYTES);
     if (tooBig) {
-      setError(`"${tooBig.name}" is over 10 MB. A photo from a phone is usually well under.`);
+      setError(
+        `"${tooBig.name}" is over ${mb(MAX_MATERIAL_FILE_BYTES)} MB. A photo from a phone is usually well under.`
+      );
       return;
     }
-    const room = MAX_FILES - files.length;
+    const room = MAX_MATERIAL_FILES - files.length;
     if (picked.length > room) {
-      setError(`Up to ${MAX_FILES} files at a time — the rest weren't added.`);
+      setError(`Up to ${MAX_MATERIAL_FILES} files at a time — the rest weren't added.`);
     }
-    setFiles((prev) => [...prev, ...picked].slice(0, MAX_FILES));
+    const next = [...files, ...picked].slice(0, MAX_MATERIAL_FILES);
+    // Four files at the per-file cap are double what the reader will take, and
+    // it stops at the total rather than failing — so the pages past it are
+    // simply absent from the digest, which from here looks like the model
+    // ignoring a page. This is the only point where that can be said out loud.
+    if (next.reduce((sum, f) => sum + f.size, 0) > MAX_MATERIAL_TOTAL_BYTES) {
+      setError(
+        `That's over ${mb(MAX_MATERIAL_TOTAL_BYTES)} MB altogether, and we'd have to stop reading part way. Remove a page, or send the rest as a second upload.`
+      );
+      return;
+    }
+    setFiles(next);
   }
 
   async function submit() {
@@ -101,7 +122,10 @@ export function MaterialUploader() {
               ? "Photograph a worksheet, or choose a PDF"
               : `${files.length} file${files.length === 1 ? "" : "s"} ready`}
           </span>
-          <span className="mono-meta">Up to {MAX_FILES} files · photos or PDF · 10 MB each</span>
+          <span className="mono-meta">
+            Up to {MAX_MATERIAL_FILES} files · photos or PDF · {mb(MAX_MATERIAL_FILE_BYTES)} MB each
+            · {mb(MAX_MATERIAL_TOTAL_BYTES)} MB in total
+          </span>
           <input
             type="file"
             accept={ACCEPTED}
@@ -144,7 +168,7 @@ export function MaterialUploader() {
           id="material-text"
           value={text}
           disabled={busy}
-          maxLength={MAX_PASTED}
+          maxLength={MAX_PASTED_CHARS}
           rows={6}
           onChange={(e) => setText(e.target.value)}
           placeholder="Paste the problems, the worked examples, or your notes."
@@ -163,14 +187,14 @@ export function MaterialUploader() {
           id="material-want"
           value={want}
           disabled={busy}
-          maxLength={MAX_WANT}
+          maxLength={MAX_WANT_CHARS}
           rows={2}
           onChange={(e) => setWant(e.target.value)}
           placeholder="e.g. more of the same, but harder — or word problems instead of drills"
           className="field resize-y"
         />
         <p className="mono-meta">
-          {want.length > 0 ? `${want.length}/${MAX_WANT} · ` : ""}Leave it blank and we&apos;ll go
+          {want.length > 0 ? `${want.length}/${MAX_WANT_CHARS} · ` : ""}Leave it blank and we&apos;ll go
           off the material alone.
         </p>
       </section>

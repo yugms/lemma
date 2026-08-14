@@ -14,11 +14,13 @@ import {
   finishMaterial,
   loadMaterialParts,
   sweepMaterialFiles,
+  type StoredDigest,
+} from "@/lib/materials";
+import {
   MAX_MATERIAL_FILES,
   MAX_PASTED_CHARS,
   MAX_WANT_CHARS,
-  type StoredDigest,
-} from "@/lib/materials";
+} from "@/lib/material-limits";
 import { ipAllowance, materialAllowance } from "@/lib/limits";
 
 export const runtime = "nodejs";
