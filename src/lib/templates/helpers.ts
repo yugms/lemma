@@ -1,7 +1,6 @@
-import type { ChoiceId, ExplanationStep, OpenAnswer } from "@/lib/ai/schemas";
+import { CHOICE_IDS, MCQ_CHOICE_IDS, type ChoiceId } from "@/lib/ai/kinds";
+import type { ExplanationStep, OpenAnswer } from "@/lib/ai/schemas";
 import type { Rng } from "@/lib/rng";
-
-const CHOICE_IDS = ["A", "B", "C", "D", "E", "F"] as const;
 
 export function gcd(a: number, b: number): number {
   a = Math.abs(a);
@@ -194,7 +193,7 @@ export function buildChoices(
     { latex: correct, misconception: null as string | null },
     ...uniqueDistractors.slice(0, 3).map((d) => ({ latex: d.latex, misconception: d.misconception as string | null })),
   ]);
-  const ids = ["A", "B", "C", "D", "E"] as const;
+  const ids = MCQ_CHOICE_IDS;
   const choices = entries.map((e, i) => ({ id: ids[i], latex: e.latex }));
   const correctIdx = entries.findIndex((e) => e.misconception === null);
   return {

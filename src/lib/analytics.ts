@@ -1,6 +1,11 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { DIFFICULTY_LABELS, formatLabel, STYLE_LABELS } from "@/lib/format";
-import { ATTEMPT_MODES, MODE_LABELS, type AttemptMode } from "@/lib/attempt-state";
+import {
+  ATTEMPT_MODES,
+  MODE_LABELS,
+  staleBefore,
+  type AttemptMode,
+} from "@/lib/attempt-state";
 import type { ProblemFormat, ProblemStyle } from "@/lib/ai/schemas";
 
 /**
@@ -123,7 +128,6 @@ export type StatsSnapshot = {
 };
 
 const ACTIVITY_DAYS = 30;
-const STALE_DAYS = 14;
 /** Below this a topic's accuracy is noise, not a weakness. */
 const MIN_FOR_RANKING = 3;
 const MAX_MISTAKES = 12;
@@ -348,9 +352,9 @@ export function aggregate(rows: AttemptRow[], now: number = 0): StatsSnapshot {
     .filter((t) => (t.accuracy ?? 0) >= 85)
     .slice(0, 3);
 
-  const staleBefore = now - STALE_DAYS * 86_400_000;
+  const cutoff = staleBefore(now);
   const stale = byTopic
-    .filter((t) => t.lastAt !== null && new Date(t.lastAt).getTime() < staleBefore)
+    .filter((t) => t.lastAt !== null && new Date(t.lastAt).getTime() < cutoff)
     .sort((a, b) => (a.lastAt ?? "").localeCompare(b.lastAt ?? ""))
     .slice(0, 3);
 

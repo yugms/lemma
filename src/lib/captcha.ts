@@ -1,6 +1,6 @@
 "use client";
 
-import { turnstileSiteKey } from "@/lib/env";
+import { isProduction, turnstileSiteKey } from "@/lib/env";
 
 /**
  * Cloudflare Turnstile, solved on demand.
@@ -206,7 +206,7 @@ export async function solveCaptcha(): Promise<string | null> {
           // (one dropped packet on a phone produces one), and the widget is
           // already retrying. Shipping it just puts a warning in a student's
           // console for something that is about to fix itself.
-          if (process.env.NODE_ENV !== "production") {
+          if (!isProduction()) {
             console.warn(
               `[lemma] Turnstile error ${code ?? "(no code)"}; letting the widget retry.`
             );

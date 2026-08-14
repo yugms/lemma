@@ -5,12 +5,9 @@ import { newShareCode } from "@/lib/share-code";
 import {
   problemHashInput,
   splitProblem,
-  type AuthoredPlot,
   type GeneratedProblem,
-  type GraphResponseKind,
   type ProblemFormat,
   type ProblemStyle,
-  type SanitizedProblem,
   type SolverResult,
   type TaggedProblem,
 } from "@/lib/ai/schemas";
@@ -20,6 +17,8 @@ import { AI_CONCURRENCY, createCallPool } from "@/lib/ai/provider";
 import { asyncQueue } from "@/lib/async-queue";
 import { instantiate, templatesFor } from "@/lib/templates";
 import { capFor, CAP_CHECK_FAILED, startOfToday } from "@/lib/limits";
+import { MAX_SET_COUNT } from "@/lib/set-size";
+import { clampDifficulty } from "@/lib/ai/kinds";
 
 
 export type SetConfig = {
@@ -66,7 +65,6 @@ export type BuildEvent =
   | { type: "error"; message: string };
 
 const POOL_FRACTION = 0.5;
-const MAX_COUNT = 15;
 /** Headroom under the route's 300s `maxDuration`, counted from the request. */
 export const BUILD_BUDGET_MS = 230_000;
 
@@ -214,7 +212,7 @@ export function rowFromGenerated(
     topic_id: topicId,
     style: p.style,
     format: p.format,
-    difficulty: Math.min(5, Math.max(1, Math.round(p.difficulty))),
+    difficulty: clampDifficulty(p.difficulty),
     content,
     answer,
     explanation,
@@ -243,7 +241,7 @@ export async function* buildProblemSet(
   requestStartedAt: number = Date.now()
 ): AsyncGenerator<BuildEvent> {
   const db = createServiceClient();
-  const count = Math.min(Math.max(config.count, 1), MAX_COUNT);
+  const count = Math.min(Math.max(config.count, 1), MAX_SET_COUNT);
 
   // --- daily cap ---
   // Only sets that actually cost a model call count. Review sets and copies of
@@ -690,102 +688,4 @@ async function insertProblems(
     id: r.id as string,
     statement: (r.content as { statement_latex?: string })?.statement_latex ?? "",
   }));
-}
-
-export type SetMeta = {
-  id: string;
-  title: string;
-  share_code: string;
-  config: SetConfig;
-  created_at: string;
-};
-
-type ItemRow = {
-  position: number;
-  problems: {
-    id: string;
-    style: ProblemStyle;
-    format: ProblemFormat;
-    difficulty: number;
-    content: {
-      statement_latex: string;
-      hint: string | null;
-      choices?: { id: string; latex: string }[];
-      blanks_count?: number;
-      items?: { id: string; latex: string }[];
-      left?: { id: string; latex: string }[];
-      right?: { id: string; latex: string }[];
-      parts?: { label: string; prompt_latex: string }[];
-      plot?: AuthoredPlot;
-      response_kind?: GraphResponseKind;
-      sketch_kind?: string;
-    };
-    topics: { title: string } | null;
-  } | null;
-};
-
-/**
- * The one place a stored problem becomes something a client may see.
- *
- * It reads only from `content`; `answer` and `explanation` are never selected,
- * so no caller can leak them by forgetting to strip a field. Shared by the
- * owner's view and the share-link preview, which is why it takes rows rather
- * than a set id — the entitlement question is the caller's to answer.
- */
-export function sanitizeItems(items: unknown): SanitizedProblem[] {
-  return ((items ?? []) as unknown as ItemRow[])
-    .filter((i) => i.problems)
-    .map((i) => ({
-      id: i.problems!.id,
-      position: i.position,
-      style: i.problems!.style,
-      format: i.problems!.format,
-      difficulty: i.problems!.difficulty,
-      statement_latex: i.problems!.content.statement_latex,
-      hint: i.problems!.content.hint,
-      choices: i.problems!.content.choices,
-      blanks_count: i.problems!.content.blanks_count,
-      items: i.problems!.content.items,
-      left: i.problems!.content.left,
-      right: i.problems!.content.right,
-      parts: i.problems!.content.parts,
-      plot: i.problems!.content.plot,
-      response_kind: i.problems!.content.response_kind,
-      sketch_kind: i.problems!.content.sketch_kind,
-      topic_title: i.problems!.topics?.title,
-    }));
-}
-
-export const ITEM_SELECT =
-  "position, problems(id, style, format, difficulty, content, topics(title))";
-
-/** Load a set with sanitized problems (answers stripped) after verifying ownership. */
-export async function loadSetForUser(
-  setId: string,
-  userId: string
-): Promise<{ set: SetMeta; problems: SanitizedProblem[] } | null> {
-  const db = createServiceClient();
-  const { data: set } = await db
-    .from("problem_sets")
-    .select("id, title, share_code, config, created_at, owner_id")
-    .eq("id", setId)
-    .single();
-  if (!set || set.owner_id !== userId) return null;
-
-  const { data: items } = await db
-    .from("problem_set_items")
-    .select(ITEM_SELECT)
-    .eq("set_id", setId)
-    .order("position");
-
-  return {
-    set: {
-      id: set.id,
-      title: set.title,
-      share_code: set.share_code,
-      config: set.config as SetConfig,
-      created_at: set.created_at,
-    },
-    problems: sanitizeItems(items),
-  };
 }

@@ -11,6 +11,7 @@ import {
 } from "@/lib/ai/schemas";
 import type { TopicInfo } from "@/lib/ai/generate";
 import type { MaterialStatus, StoredDigest } from "@/lib/materials";
+import { clampDifficulty } from "@/lib/ai/kinds";
 
 /**
  * Read one upload of study material and reduce it to a digest.
@@ -64,12 +65,6 @@ function tidyList(values: string[], count: number, chars: number): string[] {
 
 const unique = <T>(values: T[]): T[] => [...new Set(values)];
 
-/** A level in range, or the middle of the range when there wasn't a number. */
-function clampLevel(value: number): number {
-  const level = Math.round(value);
-  return Number.isFinite(level) ? Math.min(5, Math.max(1, level)) : 3;
-}
-
 /**
  * Apply every bound the schema only described, and resolve topics to real ids.
  *
@@ -101,7 +96,7 @@ export function normalizeDigest(raw: MaterialDigest, topicIds: string[]): Stored
     // `|| 3` would be the short way to cover NaN and would also swallow a
     // legitimate 0, returning the middle of the range for something the model
     // pitched at the bottom of it.
-    difficulty: clampLevel(raw.difficulty),
+    difficulty: clampDifficulty(raw.difficulty),
     // An empty list here is not harmless: `splitAcrossKinds` would produce an
     // empty plan, `generateProblems` would settle nothing and throw nothing,
     // and the build would end at "could not generate any problems" with no

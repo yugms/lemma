@@ -18,7 +18,7 @@ export function StatGrid({
   return (
     <section
       aria-label={label}
-      className={`grid grid-cols-2 gap-px overflow-hidden rounded-[5px] border border-line bg-line ${
+      className={`grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line ${
         columns === 4 ? "sm:grid-cols-4" : "sm:grid-cols-3"
       }`}
     >

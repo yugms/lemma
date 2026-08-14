@@ -46,7 +46,7 @@ export default async function MaterialsPage() {
               <li key={m.id}>
                 <Link
                   href={`/materials/${m.id}`}
-                  className="group flex items-center gap-3 rounded-[3px] border border-line px-4 py-3 transition-colors hover:border-line-strong"
+                  className="group flex items-center gap-3 rounded-sm border border-line px-4 py-3 transition-colors hover:border-line-strong"
                 >
                   <span className="min-w-0 flex-1 truncate text-sm">
                     {m.digest?.title || "Untitled material"}

@@ -54,7 +54,7 @@ export function SiteHeader({
                   href={item.href}
                   aria-current={active ? "page" : undefined}
                   transitionTypes={["nav-lateral"]}
-                  className={`relative rounded-[3px] px-2.5 py-1.5 text-sm transition-colors ${
+                  className={`relative rounded-sm px-2.5 py-1.5 text-sm transition-colors ${
                     active ? "text-fg" : "text-muted hover:text-fg"
                   }`}
                 >

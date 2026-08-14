@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import { MAX_MATERIAL_TOTAL_BYTES } from "@/lib/material-limits";
 import type { ImagePart } from "@/lib/ai/provider";
 import type { MaterialDigest } from "@/lib/ai/schemas";
 
@@ -20,16 +21,6 @@ import type { MaterialDigest } from "@/lib/ai/schemas";
  */
 
 export const MATERIAL_BUCKET = "study-materials";
-
-/** At most four files, and no more than this in total across them. */
-export const MAX_MATERIAL_FILES = 4;
-export const MAX_MATERIAL_BYTES = 20 * 1024 * 1024;
-
-/** How long a pasted excerpt may be before it is truncated. */
-export const MAX_PASTED_CHARS = 20_000;
-
-/** What the student may type about what they want next. */
-export const MAX_WANT_CHARS = 280;
 
 export type MaterialStatus = "pending" | "ready" | "failed";
 
@@ -132,7 +123,7 @@ export async function loadMaterialParts(paths: string[]): Promise<ImagePart[]> {
     if (error || !data) continue;
     const buffer = Buffer.from(await data.arrayBuffer());
     total += buffer.byteLength;
-    if (total > MAX_MATERIAL_BYTES) break;
+    if (total > MAX_MATERIAL_TOTAL_BYTES) break;
     const mimeType = sniffMimeType(buffer);
     if (!mimeType) continue;
     out.push({ mimeType, data: buffer.toString("base64") });

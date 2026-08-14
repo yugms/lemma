@@ -34,7 +34,6 @@ export function MatchingInput({
   graded?: { left_id: string; right_id: string }[];
 }) {
   const truth = graded ? new Map(graded.map((p) => [p.left_id, p.right_id])) : null;
-  const rightLabel = new Map(right.map((r) => [r.id, r.html]));
 
   return (
     <div className="mt-8 space-y-6">
@@ -50,13 +49,13 @@ export function MatchingInput({
               <li
                 key={l.id}
                 className={clsx(
-                  "flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[3px] border px-4 py-3.5 transition-colors",
+                  "flex flex-wrap items-center gap-x-4 gap-y-3 rounded-sm border px-4 py-3.5 transition-colors",
                   isRight === true && "border-ok bg-ok-wash",
                   isRight === false && "border-bad bg-bad-wash",
                   isRight === null && "border-line"
                 )}
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] border border-line-strong font-mono text-[11px] text-muted">
+                <span className="option-key">
                   {l.id}
                 </span>
                 <Math html={l.html} className="min-w-0 flex-1" />
@@ -108,11 +107,11 @@ export function MatchingInput({
         <p className="mono-meta mb-3">Choose from</p>
         <ul className="grid gap-2 sm:grid-cols-2">
           {right.map((r) => (
-            <li key={r.id} className="flex items-center gap-3 rounded-[3px] border border-line px-3 py-2.5">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] border border-line-strong font-mono text-[11px] text-muted">
+            <li key={r.id} className="flex items-center gap-3 rounded-sm border border-line px-3 py-2.5">
+              <span className="option-key">
                 {r.id}
               </span>
-              <Math html={rightLabel.get(r.id) ?? ""} className="min-w-0 flex-1" />
+              <Math html={r.html} className="min-w-0 flex-1" />
             </li>
           ))}
         </ul>

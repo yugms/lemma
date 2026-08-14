@@ -67,7 +67,7 @@ export default function robots(): MetadataRoute.Robots {
   };
 }
 
-/** Exported for `production.test.ts`, which pins the two groups apart. */
+/** Exported for `robots.test.ts`, which pins the two groups apart. */
 export const AI_AGENTS = {
   search: AI_SEARCH_AGENTS,
   training: AI_TRAINING_AGENTS,

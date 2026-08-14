@@ -11,6 +11,8 @@
  * rather than by two hand-tuned copies of the same transform.
  */
 
+import { escapeMarkup } from "@/lib/escape-markup";
+
 export type PlotCurve =
   | { kind: "linear"; m: number; b: number }
   | { kind: "quadratic"; a: number; b: number; c: number }
@@ -218,11 +220,6 @@ function fmt(v: number): string {
   return String(Number(v.toFixed(4)));
 }
 
-const escapeXml = (s: string) =>
-  s.replace(/[<>&"']/g, (c) =>
-    c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "&" ? "&amp;" : c === '"' ? "&quot;" : "&#39;"
-  );
-
 /**
  * Sample a curve into path segments, breaking wherever it leaves the window.
  *
@@ -407,7 +404,7 @@ export function renderPlot(spec: PlotSpec, opts?: { title?: string }): string {
     );
     if (m.label) {
       parts.push(
-        `<text x="${cx}" y="${(Number(cy) - 10).toFixed(2)}" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="ui-monospace, monospace">${escapeXml(
+        `<text x="${cx}" y="${(Number(cy) - 10).toFixed(2)}" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="ui-monospace, monospace">${escapeMarkup(
           m.label
         )}</text>`
       );
@@ -416,7 +413,7 @@ export function renderPlot(spec: PlotSpec, opts?: { title?: string }): string {
 
   const title = opts?.title ?? describePlot(spec);
   return (
-    `<svg viewBox="0 0 ${PLOT_W} ${PLOT_H}" role="img" aria-label="${escapeXml(title)}" ` +
+    `<svg viewBox="0 0 ${PLOT_W} ${PLOT_H}" role="img" aria-label="${escapeMarkup(title)}" ` +
     `preserveAspectRatio="xMidYMid meet" class="w-full h-auto">` +
     parts.join("") +
     `</svg>`

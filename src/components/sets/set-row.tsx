@@ -18,7 +18,6 @@ export type SetRowData = {
   total: number;
   difficulty: number;
   attempted: number;
-  correct: number;
 };
 
 export function SetRow({ set }: { set: SetRowData }) {
@@ -52,7 +51,7 @@ export function SetRow({ set }: { set: SetRowData }) {
         <Link
           href={`/set/${set.id}`}
           transitionTypes={["nav-forward"]}
-          className="min-w-0 flex-1 rounded-[3px] px-2 py-1 focus-visible:outline-offset-4"
+          className="min-w-0 flex-1 rounded-sm px-2 py-1 focus-visible:outline-offset-4"
         >
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             <span className="truncate text-[15px] font-medium underline-offset-4 group-hover:underline">
@@ -118,7 +117,7 @@ export function SetRow({ set }: { set: SetRowData }) {
               // problem: on a phone the hover never arrives, so this was not a
               // hard control to find, it was one that could not be reached at
               // all. Shown outright where there is no hover to wait for.
-              className="tap-44 rounded-[3px] p-2 text-faint opacity-0 transition-all hover:text-bad focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
+              className="tap-44 rounded-sm p-2 text-faint opacity-0 transition-all hover:text-bad focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
             >
               <Trash2 className="h-3.5 w-3.5" aria-hidden />
             </button>

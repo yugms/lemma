@@ -27,14 +27,28 @@ export type SetProgress = {
 
 const EMPTY: SetProgress = { outcomes: {}, attempted: 0, correct: 0, revealed: 0 };
 
-function summarize(outcomes: Record<string, Outcome>): SetProgress {
+/**
+ * Count a run of outcomes.
+ *
+ * Both loaders below need this and had written it out separately — one over an
+ * object, one over a Map — which meant the tri-state was decoded twice. It is
+ * the decoding that has to agree: `null` is a reveal, not a miss, and a second
+ * copy is free to forget that.
+ */
+function tally(outcomes: Iterable<Outcome>): SetTally {
+  let attempted = 0;
   let correct = 0;
   let revealed = 0;
-  for (const v of Object.values(outcomes)) {
+  for (const v of outcomes) {
+    attempted++;
     if (v === true) correct++;
     else if (v === null) revealed++;
   }
-  return { outcomes, attempted: Object.keys(outcomes).length, correct, revealed };
+  return { attempted, correct, revealed };
+}
+
+function summarize(outcomes: Record<string, Outcome>): SetProgress {
+  return { outcomes, ...tally(Object.values(outcomes)) };
 }
 
 export async function loadSetProgress(
@@ -96,15 +110,7 @@ export async function loadProgressForSets(
     perSet.set(row.problem_id, row.is_correct);
   }
 
-  for (const [setId, perSet] of latest) {
-    let correct = 0;
-    let revealed = 0;
-    for (const v of perSet.values()) {
-      if (v === true) correct++;
-      else if (v === null) revealed++;
-    }
-    tallies.set(setId, { attempted: perSet.size, correct, revealed });
-  }
+  for (const [setId, perSet] of latest) tallies.set(setId, tally(perSet.values()));
   return tallies;
 }
 

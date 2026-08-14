@@ -1,19 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Minus, Plus, Sparkles } from "lucide-react";
-import { streamBuild } from "@/lib/build-stream";
+import { BuildStatus, useBuildRun } from "@/components/build-run";
+import { DifficultyPicker } from "@/components/difficulty-picker";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 import {
   PROBLEM_FORMATS,
+  clampDifficulty,
   PROBLEM_STYLES,
   type ProblemFormat,
   type ProblemStyle,
 } from "@/lib/ai/kinds";
+import { MAX_BUILDER_COUNT, MIN_BUILDER_COUNT } from "@/lib/set-size";
 
-const MIN_COUNT = 4;
-const MAX_COUNT = 12;
 
 export type ReviewTopic = { id: string; title: string; unit: string | null };
 
@@ -28,11 +28,9 @@ export type MaterialReviewProps = {
   shift: "easier" | "same" | "harder";
 };
 
-type Progress = { message: string; done: number; total: number };
-
 /** Where the requested shift lands, clamped to the levels that exist. */
 const shifted = (level: number, shift: MaterialReviewProps["shift"]) =>
-  Math.min(5, Math.max(1, level + (shift === "harder" ? 1 : shift === "easier" ? -1 : 0)));
+  clampDifficulty(level + (shift === "harder" ? 1 : shift === "easier" ? -1 : 0));
 
 /**
  * Confirm what was found in the material, then build from it.
@@ -55,7 +53,6 @@ export function MaterialReview({
   formats: detectedFormats,
   shift,
 }: MaterialReviewProps) {
-  const router = useRouter();
   // Seeded in the initializer rather than an effect — `react-hooks/set-state-in-effect`
   // rejects the other shape, and this genuinely is initial state, not a reaction.
   const [topicIds, setTopicIds] = useState<string[]>(() => topics.map((t) => t.id));
@@ -63,10 +60,8 @@ export function MaterialReview({
   const [level, setLevel] = useState(() => shifted(difficulty, shift));
   const [styles, setStyles] = useState<ProblemStyle[]>(() => detectedStyles);
   const [formats, setFormats] = useState<ProblemFormat[]>(() => detectedFormats);
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { progress, error, busy, run } = useBuildRun();
 
-  const busy = progress !== null;
   const canSubmit = topicIds.length > 0 && styles.length > 0 && formats.length > 0 && !busy;
 
   const levelNote = useMemo(() => {
@@ -79,42 +74,11 @@ export function MaterialReview({
     if (next.length > 0) set(next);
   }
 
-  async function submit() {
-    setError(null);
-    setProgress({ done: 0, total: count, message: "Starting…" });
-    try {
-      const { ensureUser } = await import("@/lib/auth");
-      await ensureUser();
-      router.refresh();
-      for await (const event of streamBuild({
-        mode: "material",
-        materialId,
-        topicIds,
-        count,
-        difficulty: level,
-        styles,
-        formats,
-      })) {
-        if (event.type === "status") {
-          setProgress((p) => ({ ...(p ?? { done: 0, total: count }), message: event.message }));
-        } else if (event.type === "progress") {
-          setProgress((p) => ({
-            message: p?.message ?? "",
-            done: event.done,
-            total: event.total,
-          }));
-        } else if (event.type === "complete") {
-          router.push(`/set/${event.setId}`);
-          return;
-        } else if (event.type === "error") {
-          throw new Error(event.message);
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-      setProgress(null);
-    }
-  }
+  const submit = () =>
+    run(
+      { mode: "material", materialId, topicIds, count, difficulty: level, styles, formats },
+      count
+    );
 
   return (
     <div className="space-y-9">
@@ -147,21 +111,7 @@ export function MaterialReview({
         {/* The note is its own block rather than a wrapping member of the chip
             row: inside the flex it wrapped onto a second line still carrying
             `ml-2`, which read as an indented orphan under the squares. */}
-        <div className="flex flex-wrap items-center gap-2">
-          {[1, 2, 3, 4, 5].map((d) => (
-            <button
-              key={d}
-              type="button"
-              disabled={busy}
-              aria-pressed={d === level}
-              aria-label={`Level ${d} — ${DIFFICULTY_LABELS[d]}`}
-              onClick={() => setLevel(d)}
-              className="chip h-9 w-9 justify-center px-0 font-mono pointer-coarse:h-11 pointer-coarse:w-11"
-            >
-              {d}
-            </button>
-          ))}
-        </div>
+        <DifficultyPicker value={level} onChange={setLevel} disabled={busy} />
         <p className="text-sm leading-relaxed text-muted">
           {DIFFICULTY_LABELS[level]} — {levelNote}
         </p>
@@ -208,8 +158,8 @@ export function MaterialReview({
         <div className="flex items-center gap-4">
           <button
             type="button"
-            disabled={busy || count <= MIN_COUNT}
-            onClick={() => setCount((c) => Math.max(MIN_COUNT, c - 1))}
+            disabled={busy || count <= MIN_BUILDER_COUNT}
+            onClick={() => setCount((c) => Math.max(MIN_BUILDER_COUNT, c - 1))}
             aria-label="Fewer problems"
             className="btn btn-outline btn-icon"
           >
@@ -220,8 +170,8 @@ export function MaterialReview({
           </span>
           <button
             type="button"
-            disabled={busy || count >= MAX_COUNT}
-            onClick={() => setCount((c) => Math.min(MAX_COUNT, c + 1))}
+            disabled={busy || count >= MAX_BUILDER_COUNT}
+            onClick={() => setCount((c) => Math.min(MAX_BUILDER_COUNT, c + 1))}
             aria-label="More problems"
             className="btn btn-outline btn-icon"
           >
@@ -231,37 +181,7 @@ export function MaterialReview({
         </div>
       </section>
 
-      {progress && (
-        <div className="space-y-3">
-          <div className="flex items-baseline justify-between gap-4">
-            <span aria-live="polite" className="text-sm text-muted">
-              {progress.message}
-            </span>
-            <span className="mono-meta">
-              {progress.done}/{progress.total}
-            </span>
-          </div>
-          <div
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={progress.total}
-            aria-valuenow={progress.done}
-            aria-label="Generation progress"
-            className="meter meter-live"
-          >
-            <div
-              className="meter-fill"
-              style={{ width: `${Math.max(3, (progress.done / progress.total) * 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {error && (
-        <p role="alert" className="aside-rule border-bad py-1 text-sm leading-relaxed text-bad">
-          {error}
-        </p>
-      )}
+      <BuildStatus progress={progress} error={error} />
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         <button

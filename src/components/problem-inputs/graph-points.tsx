@@ -82,10 +82,7 @@ export function GraphPointsInput({
         {truth ? "Your selection" : "Click the points being asked for"}
       </p>
 
-      {/* Full-bleed against the card's `p-6` on a phone. 48px of extra width
-          is 14% more space between lattice points, which is the only lever
-          that makes the targets bigger without making them ambiguous. */}
-      <div className="relative -mx-6 overflow-hidden border-y border-line bg-surface sm:mx-0 sm:rounded-[3px] sm:border-x">
+      <div className="plot-frame relative">
         {/* Not `aria-hidden`. The server-rendered plot carries its own
             `role="img"` and a description of the curve and axes — the stimulus
             — while the overlay below names the controls. They describe

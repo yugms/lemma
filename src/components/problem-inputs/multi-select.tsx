@@ -57,7 +57,7 @@ export function MultiSelectInput({
             disabled={disabled}
             onClick={() => onToggle(o.id)}
             className={clsx(
-              "group flex w-full items-center gap-4 rounded-[3px] border px-4 py-3.5 text-left transition-all duration-200",
+              "option-row",
               state === "got" && "border-ok bg-ok-wash",
               state === "wrong" && "border-bad bg-bad-wash",
               state === "missed" && "border-ok border-dashed",
@@ -68,7 +68,7 @@ export function MultiSelectInput({
           >
             <span
               className={clsx(
-                "flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] border font-mono text-[11px] transition-colors",
+                "option-key",
                 state === "got" && "border-ok bg-ok text-paper",
                 state === "wrong" && "border-bad bg-bad text-paper",
                 state === "missed" && "border-ok text-ok",

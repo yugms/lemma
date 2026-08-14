@@ -1,15 +1,17 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { ChevronDown, Loader2, Minus, Plus, Sparkles, X, Zap } from "lucide-react";
+import { BuildStatus, useBuildRun } from "@/components/build-run";
+import { DifficultyPicker } from "@/components/difficulty-picker";
+import { SPEC_ROW } from "@/components/skeletons";
 import type { CatalogCourse } from "@/lib/catalog";
-import { streamBuild } from "@/lib/build-stream";
 import { DIFFICULTY_LABELS, FORMAT_LABELS, STYLE_LABELS } from "@/lib/format";
 // From `kinds` rather than `schemas`: the vocabulary is the same, but importing
 // a value from `schemas` puts the whole zod runtime in this route's bundle.
 import { PROBLEM_FORMATS, type ProblemFormat, type ProblemStyle } from "@/lib/ai/kinds";
+import { MAX_BUILDER_COUNT, MIN_BUILDER_COUNT } from "@/lib/set-size";
 
 /* Labels come from `format.ts` so the builder's controls and the stats
    breakdowns always name the same thing the same way. */
@@ -35,11 +37,7 @@ const FORMAT_HINTS: Record<ProblemFormat, string> = {
   ordering: "Arrange the steps of a method",
 };
 
-const MIN_COUNT = 3;
-const MAX_COUNT = 12;
 const MAX_TOPICS = 6;
-
-type Progress = { done: number; total: number; message: string };
 
 /** One labelled row of the spec sheet. Label left, controls right. */
 function Row({
@@ -56,7 +54,7 @@ function Row({
     <section
       role="group"
       aria-labelledby={id}
-      className="grid gap-4 border-b border-line py-8 sm:grid-cols-[8.5rem_1fr] sm:gap-10"
+      className={SPEC_ROW}
     >
       <div className="flex items-baseline justify-between gap-3 sm:block">
         <h2 id={id} className="eyebrow">
@@ -70,7 +68,6 @@ function Row({
 }
 
 export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
-  const router = useRouter();
   /* Which course is being browsed — not a property of the set. A set is just a
      list of topic ids, and the pipeline labels each one with its own course
      when it prompts the author, so a set may span as many as it likes. */
@@ -81,8 +78,7 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
   const [difficulty, setDifficulty] = useState(2);
   const [styles, setStyles] = useState<ProblemStyle[]>(["drill"]);
   const [formats, setFormats] = useState<ProblemFormat[]>(["mcq", "open"]);
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { progress, error, busy, run } = useBuildRun();
 
   const course = useMemo(() => catalog.find((c) => c.id === courseId), [catalog, courseId]);
   const visibleUnits = useMemo(
@@ -139,41 +135,9 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
     );
   };
 
-  const busy = progress !== null;
   const canSubmit = topicIds.length > 0 && styles.length > 0 && formats.length > 0 && !busy;
 
-  async function submit() {
-    setError(null);
-    setProgress({ done: 0, total: count, message: "Starting…" });
-    try {
-      // Loaded on submit, not on mount — the Supabase SDK is the heaviest
-      // dependency on this page and nothing needs it until you generate.
-      const { ensureUser } = await import("@/lib/auth");
-      await ensureUser();
-      // That may have just minted an anonymous session. Auth is resolved on the
-      // server and handed to the header as a prop, so without this the header
-      // keeps offering "Sign in" to someone who now has a session and a set.
-      router.refresh();
-      for await (const event of streamBuild({ topicIds, count, difficulty, styles, formats })) {
-        if (event.type === "status") {
-          setProgress((p) => ({ ...(p ?? { done: 0, total: count }), message: event.message }));
-        } else if (event.type === "progress") {
-          setProgress((p) => ({ message: p?.message ?? "", done: event.done, total: event.total }));
-        } else if (event.type === "complete") {
-          // Progress is deliberately left set so the controls stay locked
-          // through the navigation.
-          router.push(`/set/${event.setId}`);
-          return;
-        } else if (event.type === "error") {
-          throw new Error(event.message);
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-      setProgress(null);
-    }
-  }
-
+  const submit = () => run({ topicIds, count, difficulty, styles, formats }, count);
 
   return (
     <div className="border-t border-line">
@@ -302,8 +266,8 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
         <div className="flex items-center gap-4">
           <button
             type="button"
-            disabled={busy || count <= MIN_COUNT}
-            onClick={() => setCount((c) => Math.max(MIN_COUNT, c - 1))}
+            disabled={busy || count <= MIN_BUILDER_COUNT}
+            onClick={() => setCount((c) => Math.max(MIN_BUILDER_COUNT, c - 1))}
             aria-label="Fewer problems"
             className="btn btn-outline btn-icon"
           >
@@ -317,8 +281,8 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
           </span>
           <button
             type="button"
-            disabled={busy || count >= MAX_COUNT}
-            onClick={() => setCount((c) => Math.min(MAX_COUNT, c + 1))}
+            disabled={busy || count >= MAX_BUILDER_COUNT}
+            onClick={() => setCount((c) => Math.min(MAX_BUILDER_COUNT, c + 1))}
             aria-label="More problems"
             className="btn btn-outline btn-icon"
           >
@@ -330,20 +294,7 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
 
       <Row label="Difficulty">
         <div className="flex flex-wrap items-center gap-2">
-          {[1, 2, 3, 4, 5].map((d) => (
-            <button
-              key={d}
-              type="button"
-              aria-pressed={d === difficulty}
-              aria-label={`Level ${d} — ${DIFFICULTY_LABELS[d]}`}
-              disabled={busy}
-              onClick={() => setDifficulty(d)}
-              // Fixed square, so the coarse `.chip` padding would fight it.
-              className="chip h-9 w-9 justify-center px-0 font-mono pointer-coarse:h-11 pointer-coarse:w-11"
-            >
-              {d}
-            </button>
-          ))}
+          <DifficultyPicker value={difficulty} onChange={setDifficulty} disabled={busy} />
           <span className="ml-2 text-sm text-muted">{DIFFICULTY_LABELS[difficulty]}</span>
         </div>
       </Row>
@@ -359,11 +310,11 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
                 aria-pressed={on}
                 disabled={busy}
                 onClick={() => toggle(styles, s.id, setStyles, 1)}
-                className="group flex w-full items-start gap-4 rounded-[3px] py-2.5 text-left disabled:opacity-50"
+                className="group flex w-full items-start gap-4 rounded-sm py-2.5 text-left disabled:opacity-50"
               >
                 <span
                   className={clsx(
-                    "mt-[3px] h-3.5 w-3.5 shrink-0 rounded-[2px] border transition-colors",
+                    "mt-[3px] h-3.5 w-3.5 shrink-0 rounded-xs border transition-colors",
                     on
                       ? "border-accent bg-accent-solid"
                       : "border-line-strong bg-surface group-hover:border-accent"
@@ -429,41 +380,7 @@ export function BuilderForm({ catalog }: { catalog: CatalogCourse[] }) {
           </p>
         )}
 
-        {progress && (
-          <div className="space-y-3">
-            <div className="flex items-baseline justify-between gap-4">
-              <span aria-live="polite" className="text-sm text-muted">
-                {progress.message}
-              </span>
-              <span className="mono-meta">
-                {progress.done}/{progress.total}
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={progress.total}
-              aria-valuenow={progress.done}
-              aria-label="Generation progress"
-              className="meter meter-live"
-            >
-              <div
-                className="meter-fill"
-                // Floored so the bar is never invisible while work is real.
-                style={{ width: `${Math.max(3, (progress.done / progress.total) * 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <p
-            role="alert"
-            className="aside-rule border-bad py-1 text-sm leading-relaxed text-bad"
-          >
-            {error}
-          </p>
-        )}
+        <BuildStatus progress={progress} error={error} />
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           <button

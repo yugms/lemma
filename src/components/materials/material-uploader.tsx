@@ -4,6 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, Loader2, Sparkles, Upload, X } from "lucide-react";
 import clsx from "clsx";
+import { uploadToBucket } from "@/lib/bucket-upload";
+import { postJson, RequestFailed } from "@/lib/post-json";
+import {
+  MAX_MATERIAL_FILE_BYTES,
+  MAX_MATERIAL_FILES,
+  MAX_MATERIAL_TOTAL_BYTES,
+  MAX_PASTED_CHARS,
+  MAX_WANT_CHARS,
+} from "@/lib/material-limits";
 
 /**
  * Turn a worksheet, a chapter or a page of notes into something practice can be
@@ -14,16 +23,17 @@ import clsx from "clsx";
  * policy's `${userId}/...` prefix is what authorizes the write. The route is
  * then told only which paths to read.
  *
- * These constants are duplicates of the ones in `lib/materials.ts`, which
+ * The caps come from `material-limits.ts` rather than `lib/materials.ts`, which
  * cannot be imported here: that module pulls in the service client, and a
  * client component importing it would ship the service client to the browser.
- * The bucket's own `file_size_limit` is the copy that actually holds.
+ * They were hand-copied for that reason and one copy had already drifted. What
+ * is checked here is a courtesy either way — the bucket's `file_size_limit` and
+ * the reader's own cap are what actually hold.
  */
 const ACCEPTED = "image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf";
-const MAX_FILES = 4;
-const MAX_BYTES = 10 * 1024 * 1024;
-const MAX_PASTED = 20_000;
-const MAX_WANT = 280;
+
+/** So the copy quotes the cap rather than a number that used to match it. */
+const mb = (bytes: number) => Math.round(bytes / (1024 * 1024));
 
 type Phase = "idle" | "uploading" | "reading";
 
@@ -42,55 +52,59 @@ export function MaterialUploader() {
     if (!list) return;
     setError(null);
     const picked = Array.from(list);
-    const tooBig = picked.find((f) => f.size > MAX_BYTES);
+    const tooBig = picked.find((f) => f.size > MAX_MATERIAL_FILE_BYTES);
     if (tooBig) {
-      setError(`"${tooBig.name}" is over 10 MB. A photo from a phone is usually well under.`);
+      setError(
+        `"${tooBig.name}" is over ${mb(MAX_MATERIAL_FILE_BYTES)} MB. A photo from a phone is usually well under.`
+      );
       return;
     }
-    const room = MAX_FILES - files.length;
+    const room = MAX_MATERIAL_FILES - files.length;
     if (picked.length > room) {
-      setError(`Up to ${MAX_FILES} files at a time — the rest weren't added.`);
+      setError(`Up to ${MAX_MATERIAL_FILES} files at a time — the rest weren't added.`);
     }
-    setFiles((prev) => [...prev, ...picked].slice(0, MAX_FILES));
+    const next = [...files, ...picked].slice(0, MAX_MATERIAL_FILES);
+    // Four files at the per-file cap are double what the reader will take, and
+    // it stops at the total rather than failing — so the pages past it are
+    // simply absent from the digest, which from here looks like the model
+    // ignoring a page. This is the only point where that can be said out loud.
+    if (next.reduce((sum, f) => sum + f.size, 0) > MAX_MATERIAL_TOTAL_BYTES) {
+      setError(
+        `That's over ${mb(MAX_MATERIAL_TOTAL_BYTES)} MB altogether, and we'd have to stop reading part way. Remove a page, or send the rest as a second upload.`
+      );
+      return;
+    }
+    setFiles(next);
   }
 
   async function submit() {
     setError(null);
     setPhase("uploading");
     try {
-      // Loaded at click time, not on mount: the Supabase SDK is the heaviest
-      // dependency on this page and nothing needs it until you upload.
-      const [{ createClient }, { ensureUser }] = await Promise.all([
-        import("@/lib/supabase/client"),
-        import("@/lib/auth"),
-      ]);
-      const user = await ensureUser();
-      const supabase = createClient();
-
-      const stamp = crypto.randomUUID();
-      const paths: string[] = [];
-      for (const [i, file] of files.entries()) {
-        const ext = (file.name.split(".").pop() ?? "bin").toLowerCase();
-        const path = `${user.id}/${stamp}/${i}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from("study-materials")
-          .upload(path, file, { contentType: file.type });
-        if (upErr) throw new Error("That upload didn't go through — check your connection.");
-        paths.push(path);
-      }
+      const paths = await uploadToBucket("study-materials", files);
 
       setPhase("reading");
-      const res = await fetch("/api/materials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths, text: text.trim(), want: want.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Couldn't read that one.");
-
-      router.push(`/materials/${json.materialId}`);
+      const { materialId } = await postJson<{ materialId: string }>(
+        "/api/materials",
+        { paths, text: text.trim(), want: want.trim() },
+        "Couldn't read that one."
+      );
+      router.push(`/materials/${materialId}`);
       // Left busy through the navigation, so nothing can be submitted twice.
     } catch (e) {
+      /**
+       * A rejection is still a material, and it is the one failure that has
+       * somewhere to go: the server hands back the id of the row it declined,
+       * whose own page explains the verdict in our words. Without this the row
+       * was written, listed nowhere (the index shows only `ready`), and
+       * reachable only by typing the URL.
+       *
+       * Every other failure has no id and stays on the form.
+       */
+      if (e instanceof RequestFailed && typeof e.body.materialId === "string") {
+        router.push(`/materials/${e.body.materialId}`);
+        return;
+      }
       setError(e instanceof Error ? e.message : "Something went wrong.");
       setPhase("idle");
     }
@@ -100,10 +114,7 @@ export function MaterialUploader() {
     <div className="space-y-9">
       <section>
         <label
-          className={clsx(
-            "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-[3px] border border-dashed px-6 py-12 text-center transition-colors",
-            busy ? "border-line opacity-60" : "border-line-strong hover:border-accent"
-          )}
+          className={clsx("dropzone", busy && "dropzone-busy")}
         >
           <Upload className="h-5 w-5 text-faint" aria-hidden />
           <span className="text-sm text-muted">
@@ -111,7 +122,10 @@ export function MaterialUploader() {
               ? "Photograph a worksheet, or choose a PDF"
               : `${files.length} file${files.length === 1 ? "" : "s"} ready`}
           </span>
-          <span className="mono-meta">Up to {MAX_FILES} files · photos or PDF · 10 MB each</span>
+          <span className="mono-meta">
+            Up to {MAX_MATERIAL_FILES} files · photos or PDF · {mb(MAX_MATERIAL_FILE_BYTES)} MB each
+            · {mb(MAX_MATERIAL_TOTAL_BYTES)} MB in total
+          </span>
           <input
             type="file"
             accept={ACCEPTED}
@@ -127,7 +141,7 @@ export function MaterialUploader() {
             {files.map((f, i) => (
               <li
                 key={`${f.name}-${i}`}
-                className="flex items-center gap-3 rounded-[3px] border border-line px-3 py-2.5"
+                className="flex items-center gap-3 rounded-sm border border-line px-3 py-2.5"
               >
                 <FileText className="h-3.5 w-3.5 shrink-0 text-faint" aria-hidden />
                 <span className="min-w-0 flex-1 truncate text-sm">{f.name}</span>
@@ -154,7 +168,7 @@ export function MaterialUploader() {
           id="material-text"
           value={text}
           disabled={busy}
-          maxLength={MAX_PASTED}
+          maxLength={MAX_PASTED_CHARS}
           rows={6}
           onChange={(e) => setText(e.target.value)}
           placeholder="Paste the problems, the worked examples, or your notes."
@@ -173,20 +187,20 @@ export function MaterialUploader() {
           id="material-want"
           value={want}
           disabled={busy}
-          maxLength={MAX_WANT}
+          maxLength={MAX_WANT_CHARS}
           rows={2}
           onChange={(e) => setWant(e.target.value)}
           placeholder="e.g. more of the same, but harder — or word problems instead of drills"
           className="field resize-y"
         />
         <p className="mono-meta">
-          {want.length > 0 ? `${want.length}/${MAX_WANT} · ` : ""}Leave it blank and we&apos;ll go
+          {want.length > 0 ? `${want.length}/${MAX_WANT_CHARS} · ` : ""}Leave it blank and we&apos;ll go
           off the material alone.
         </p>
       </section>
 
       {error && (
-        <p role="alert" className="aside-rule border-bad py-1 text-sm leading-relaxed text-bad">
+        <p role="alert" className="aside-rule-bad">
           {error}
         </p>
       )}

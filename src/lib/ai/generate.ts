@@ -47,8 +47,6 @@ export type GenerationRequest = {
   material?: { concepts: string[]; archetypes: string[]; emphasis: string[] };
 };
 
-const MAX_PER_CALL = PROBLEMS_PER_CALL;
-
 const FORMAT_BRIEF: Record<GenerationKind, string> = {
   mcq: "multiple choice: 4-5 choices, exactly one correct, every distractor traceable to a specific misconception",
   open: "open answer: the student types the answer, so give a canonical form plus every acceptable alternate form",
@@ -70,11 +68,8 @@ const FORMAT_BRIEF: Record<GenerationKind, string> = {
     "graph (produce a curve): describe a target curve in words in the statement, and give it in `target_curve`. The student positions a curve to match, so `plot` should show the grid and any reference the question mentions — never the target curve itself",
 };
 
-function buildUserMessage(
-  req: GenerationRequest,
-  mix: Map<GenerationKind, number>,
-  avoid: string[]
-): string {
+function buildUserMessage(req: GenerationRequest, mix: Map<GenerationKind, number>): string {
+  const { avoid } = req;
   const count = [...mix.values()].reduce((a, b) => a + b, 0);
   const topicLines = req.topics
     .map(
@@ -156,9 +151,10 @@ ${[...mix]
  *
  * The old shape was one call per generation kind, which made the *number of
  * formats* the thing that set the request count: a six-problem set across six
- * formats went out as six calls authoring one problem each, and `MAX_PER_CALL`
- * never bound because the split across kinds happened first. On a free tier
- * metered by requests per day rather than tokens, that is the whole cost.
+ * formats went out as six calls authoring one problem each, and
+ * `PROBLEMS_PER_CALL` never bound because the split across kinds happened
+ * first. On a free tier metered by requests per day rather than tokens, that
+ * is the whole cost.
  *
  * Kinds are dealt round-robin so each call gets a spread of formats rather than
  * one call being all the graphs — a batch the model plans as a whole is where
@@ -222,8 +218,8 @@ export type GenerationOptions = {
 };
 
 /**
- * Generate up to `req.count` problems: one call per format, per MAX_PER_CALL
- * chunk, all in flight together. Returns whatever came back validated —
+ * Generate up to `req.count` problems, in as few calls as the mix fits into
+ * and all in flight together. Returns whatever came back validated —
  * shortfalls are the caller's to deal with.
  */
 export async function generateProblems(
@@ -237,7 +233,7 @@ export async function generateProblems(
   const plan = new Map(
     [...splitAcrossKinds(req.count, req.formats)].filter(([, wanted]) => wanted > 0)
   );
-  const calls = packIntoCalls(plan, MAX_PER_CALL);
+  const calls = packIntoCalls(plan, PROBLEMS_PER_CALL);
 
   const results: TaggedProblem[] = [];
   const seen = new Set(req.avoid.map(statementKey));
@@ -251,7 +247,7 @@ export async function generateProblems(
           // written when one of these is the slow or failing one.
           label: `author:${[...mix.keys()].join("+")}`,
           system: GENERATOR_SYSTEM_PROMPT,
-          prompt: buildUserMessage(req, mix, req.avoid),
+          prompt: buildUserMessage(req, mix),
           schema: MixedBatchSchema,
           maxOutputTokens: 40000,
           thinking: "medium",

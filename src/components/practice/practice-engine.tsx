@@ -3,19 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import clsx from "clsx";
-import { ArrowLeft, ArrowRight, Check, Eye, Flag, RotateCcw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Flag } from "lucide-react";
 import { ProblemCard } from "@/components/problem-card";
-import { Prose } from "@/components/latex";
 import { EmptySet } from "@/components/practice/empty-set";
-import { formatDuration } from "@/lib/format";
+import { ProblemRail } from "@/components/practice/problem-rail";
+import { SetSummary, type Outcomes } from "@/components/practice/set-summary";
+import { MAX_TIME_MS } from "@/lib/attempt-state";
+import { postJson } from "@/lib/post-json";
 import type { CheckResponse, PreparedProblem } from "@/lib/ai/schemas";
 import type { Outcome } from "@/lib/progress";
-
-type Outcomes = Record<string, Outcome>;
-
-/** `/api/check` rejects anything larger, and a tab left open all afternoon
- *  would otherwise 400 the submission rather than grade it. */
-const MAX_TIME_MS = 3_600_000;
 
 /**
  * Outcome colours own this component. "Current" is deliberately ink rather
@@ -105,37 +101,6 @@ export function PracticeEngine({
   }, [problems, outcomes]);
 
   /**
-   * What this sitting actually produced, for the summary. Everything here comes
-   * from payloads already in hand — no extra request just to close the set.
-   */
-  const debrief = useMemo(() => {
-    const missedTopics = new Map<string, number>();
-    const notes: { topic: string; html: string }[] = [];
-    let recovered = 0;
-
-    for (const p of problems) {
-      const o = outcomes[p.id];
-      const res = results[p.id];
-      if (res?.retry?.correct) recovered++;
-      if (o === true || o === undefined) continue;
-
-      const topic = p.topic_title ?? "This set";
-      missedTopics.set(topic, (missedTopics.get(topic) ?? 0) + 1);
-      // The grader's read on this specific miss — written at submission time
-      // and, until now, only ever visible on the card you had to be looking at.
-      if (res?.feedback && notes.length < 4) {
-        notes.push({ topic, html: res.feedback.what_went_wrong_html });
-      }
-    }
-
-    return {
-      recovered,
-      notes,
-      missedTopics: [...missedTopics.entries()].sort((a, b) => b[1] - a[1]),
-    };
-  }, [problems, outcomes, results]);
-
-  /**
    * Pull back a previously earned outcome so review shows real history.
    * In-flight ids live in a ref rather than state — this only guards against
    * duplicate requests, and nothing renders from it.
@@ -145,23 +110,13 @@ export function PracticeEngine({
       if (inFlight.current.has(problemId)) return;
       inFlight.current.add(problemId);
       try {
-        const res = await fetch("/api/check", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            problemId,
-            setId: set.id,
-            mode: "practice",
-            action: "recall",
-          }),
-        });
-        if (res.ok) {
-          const data = (await res.json()) as CheckResponse;
-          setResults((prev) => ({ ...prev, [problemId]: data }));
-          setRecallState((prev) => ({ ...prev, [problemId]: "done" }));
-        } else {
-          setRecallState((prev) => ({ ...prev, [problemId]: "failed" }));
-        }
+        const data = await postJson<CheckResponse>(
+          "/api/check",
+          { problemId, setId: set.id, mode: "practice", action: "recall" },
+          "Recall failed"
+        );
+        setResults((prev) => ({ ...prev, [problemId]: data }));
+        setRecallState((prev) => ({ ...prev, [problemId]: "done" }));
       } catch {
         // A failed recall just means the card opens without the earlier
         // answer — the outcome is still recorded, so nothing is lost.
@@ -250,142 +205,19 @@ export function PracticeEngine({
   // no heading at all — a blank screen with no explanation and no way out.
   if (!problem) return <EmptySet setId={set.id} />;
 
-  /* ── Summary ─────────────────────────────────────────────────── */
-
   if (showSummary) {
-    const denominator = tally.answered;
-    const pct = denominator > 0 ? Math.round((tally.correct / denominator) * 100) : 0;
     return (
-      <div className="mx-auto max-w-2xl">
-        <p className="eyebrow eyebrow-accent">Set complete</p>
-        <h1
-          ref={headingRef}
-          tabIndex={-1}
-          className="display mt-6 text-[clamp(3.5rem,10vw,5.5rem)] leading-none tracking-[-0.03em] tabular-nums outline-none"
-        >
-          {tally.correct}
-          <span className="text-faint">/{denominator}</span>
-        </h1>
-        <p className="mt-4 text-prose text-muted">
-          {denominator > 0 ? `${pct}% correct` : "No answers graded"}
-          {tally.revealed > 0 && ` · ${tally.revealed} revealed`}
-          {sittingMs !== null && ` · ${formatDuration(sittingMs)}`}
-        </p>
-
-        {debrief.recovered > 0 && (
-          <p className="mono-meta mt-3 flex items-center gap-2">
-            <RotateCcw className="h-3 w-3 text-ok" aria-hidden />
-            <span className="text-ok">
-              {debrief.recovered} put right on a second attempt
-            </span>
-          </p>
-        )}
-
-        {debrief.missedTopics.length > 0 && (
-          <section className="mt-10 border-t border-line pt-8">
-            <p className="eyebrow">Where the misses were</p>
-            <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
-              {debrief.missedTopics.map(([topic, n]) => (
-                <li key={topic} className="mono-meta">
-                  {topic}
-                  <span className="text-bad"> · {n}</span>
-                </li>
-              ))}
-            </ul>
-
-            {/* The diagnoses written while grading. They were only ever visible
-                on the card you happened to be looking at; this is the first
-                place they read as a pattern rather than as one-offs. */}
-            {debrief.notes.length > 0 && (
-              <ul className="mt-6 space-y-4">
-                {debrief.notes.map((n, i) => (
-                  <li key={i} className="aside-rule py-0.5">
-                    <p className="eyebrow">{n.topic}</p>
-                    <Prose
-                      html={n.html}
-                      className="mt-1.5 text-[13px] leading-relaxed text-muted"
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
-
-        <div className="mt-10 border-t border-line pt-8">
-          <p className="eyebrow">Problem by problem</p>
-          <ul className="mt-5 grid gap-2">
-            {problems.map((p, i) => {
-              const o = outcomes[p.id];
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onClick={() => go(i)}
-                    className="group flex w-full items-center gap-4 rounded-[3px] border border-line px-4 py-3 text-left transition-colors hover:border-accent-line hover:bg-surface"
-                  >
-                    <span className="mono-meta w-6 shrink-0">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <span
-                      className={clsx(
-                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
-                        o === true && "bg-ok-wash text-ok",
-                        o === false && "bg-bad-wash text-bad",
-                        o === null && "bg-sunk text-faint",
-                        o === undefined && "border border-dashed border-line-strong"
-                      )}
-                    >
-                      {o === true && <Check className="h-3 w-3" strokeWidth={3} aria-hidden />}
-                      {o === false && <X className="h-3 w-3" strokeWidth={3} aria-hidden />}
-                      {o === null && <Eye className="h-3 w-3" aria-hidden />}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm text-muted transition-colors group-hover:text-fg">
-                      {p.topic_title ?? `Problem ${i + 1}`}
-                    </span>
-                    <span className="sr-only">
-                      {o === true
-                        ? "Correct"
-                        : o === false
-                          ? "Incorrect"
-                          : o === null
-                            ? "Revealed"
-                            : "Not attempted"}
-                    </span>
-                    <ArrowRight
-                      aria-hidden
-                      className="h-3.5 w-3.5 shrink-0 text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-accent"
-                    />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-
-        {/* Two real exits rather than a dead end: the misses are the reason to
-            go to /review, and /stats is where they turn into a pattern. */}
-        <div className="mt-10 flex flex-wrap gap-3">
-          {hasAccount && tally.wrong + tally.revealed > 0 ? (
-            <Link href="/review" transitionTypes={["nav-forward"]} className="btn btn-accent">
-              <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-              Practise what you missed
-            </Link>
-          ) : (
-            <Link href="/build" transitionTypes={["nav-lateral"]} className="btn btn-accent">
-              Build another set
-            </Link>
-          )}
-          {hasAccount && (
-            <Link href="/stats" transitionTypes={["nav-forward"]} className="btn btn-outline">
-              Full stats
-            </Link>
-          )}
-          <Link href={`/set/${set.id}`} transitionTypes={["nav-back"]} className="btn btn-ghost">
-            Set overview
-          </Link>
-        </div>
-      </div>
+      <SetSummary
+        ref={headingRef}
+        set={set}
+        problems={problems}
+        outcomes={outcomes}
+        results={results}
+        tally={tally}
+        sittingMs={sittingMs}
+        hasAccount={hasAccount}
+        onGo={go}
+      />
     );
   }
 
@@ -403,37 +235,15 @@ export function PracticeEngine({
           <span className="truncate">{set.title}</span>
         </Link>
 
-        {/* A set runs to MAX_COUNT = 15 (src/lib/sets.ts), which at the old
-            `w-5 shrink-0` needed ~371px of un-shrinkable rail beside a title
-            in a 335px box. It scrolls instead, and the pitch is 24px so
-            adjacent targets are tangent rather than overlapping — the `sm:w-6`
-            was backwards, widening the dots on the screen that had room. */}
-        <nav
-          aria-label="Problems"
-          className="-mr-5 flex max-w-[55%] shrink-0 gap-1 overflow-x-auto pr-5 [scrollbar-width:none] sm:mr-0 sm:max-w-none sm:overflow-visible sm:pr-0"
-        >
-          {problems.map((p, i) => {
+        <ProblemRail
+          noun="Problem"
+          stops={problems.map((p, i) => {
             const tone = toneFor(outcomes[p.id], i === current);
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => go(i)}
-                aria-current={i === current ? "step" : undefined}
-                aria-label={`Problem ${i + 1}, ${tone.label}`}
-                className="group -my-2 shrink-0 px-1 py-3"
-              >
-                <span
-                  className={clsx(
-                    "block h-[3px] w-4 rounded-full transition-all duration-300 group-hover:h-[5px] sm:w-6",
-                    tone.className,
-                    i === current && "h-[5px]"
-                  )}
-                />
-              </button>
-            );
+            return { key: p.id, tone: tone.className, state: tone.label };
           })}
-        </nav>
+          current={current}
+          onGo={go}
+        />
       </div>
 
       <h1 ref={headingRef} tabIndex={-1} className="sr-only outline-none">
@@ -453,24 +263,18 @@ export function PracticeEngine({
           initialResult={cached ?? null}
           locked={awaitingHistory}
           onCheck={async (action, answer) => {
-            const res = await fetch("/api/check", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
+            const data = await postJson<CheckResponse>(
+              "/api/check",
+              {
                 problemId: problem.id,
                 setId: set.id,
                 mode: "practice",
                 action,
                 answer,
                 timeMs: Math.min(Date.now() - startedAt.current, MAX_TIME_MS),
-              }),
-            });
-            if (!res.ok) {
-              throw new Error(
-                (await res.json().catch(() => null))?.error ?? "Check failed"
-              );
-            }
-            const data = (await res.json()) as CheckResponse;
+              },
+              "Check failed"
+            );
             // Hold on to what they submitted, so coming back to this problem
             // replays their own answer without another round-trip.
             setResults((prev) => ({

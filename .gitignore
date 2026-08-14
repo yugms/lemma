@@ -38,6 +38,13 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Claude Code's skill directory is a symlink to .agents/skills, which is the
+# tracked copy. Git followed it and recorded 121 duplicate blobs.
+/.claude/skills
+
+# Marketing renders — megabytes of mp4 and stills that no build reads.
+/ads
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

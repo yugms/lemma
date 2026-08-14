@@ -44,7 +44,7 @@ export function ShareLink({ code }: { code: string }) {
         {copied ? "Share link copied to clipboard" : ""}
       </span>
       {failed && (
-        <code className="mono-meta select-all rounded-[2px] bg-sunk px-2 py-1">/s/{code}</code>
+        <code className="mono-meta select-all rounded-xs bg-sunk px-2 py-1">/s/{code}</code>
       )}
     </span>
   );

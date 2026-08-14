@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { renderInline, renderMath, renderProse } from "@/lib/math-render";
 import { curveFromAuthored, plotFromSpec, renderPlot } from "@/lib/plot";
+import { escapeMarkup } from "@/lib/escape-markup";
 import {
   assertNeverFormat,
   assertNeverGraphResponse,
@@ -83,16 +84,16 @@ export function renderAnswer(
         answer_html: chosen
           ? // renderInline, not renderMath: a choice may be a sentence, and a
             // sentence in math mode loses the spaces between its words.
-            `<strong>${escape(id)}.</strong> ${renderInline(chosen.latex)}`
-          : `<strong>${escape(id)}</strong>`,
+            `<strong>${escapeMarkup(id)}.</strong> ${renderInline(chosen.latex)}`
+          : `<strong>${escapeMarkup(id)}</strong>`,
       };
     }
 
     case "multi_select":
-      return { answer_html: `<strong>${escape((answer.correct_choice_ids ?? []).join(", "))}</strong>` };
+      return { answer_html: `<strong>${escapeMarkup((answer.correct_choice_ids ?? []).join(", "))}</strong>` };
 
     case "ordering":
-      return { answer_html: `<strong>${escape((answer.correct_order ?? []).join(" → "))}</strong>` };
+      return { answer_html: `<strong>${escapeMarkup((answer.correct_order ?? []).join(" → "))}</strong>` };
 
     case "open":
       return { answer_html: renderMath(answer.answer?.value_latex ?? "") };
@@ -108,7 +109,7 @@ export function renderAnswer(
       // Both sides by id, since the printed problem lists them with those ids.
       return {
         answer_html: (answer.correct_pairs ?? [])
-          .map((p) => `${escape(p.left_id)}&nbsp;→&nbsp;${escape(p.right_id)}`)
+          .map((p) => `${escapeMarkup(p.left_id)}&nbsp;→&nbsp;${escapeMarkup(p.right_id)}`)
           .join('<span class="mx-2 text-faint">·</span>'),
       };
 
@@ -117,7 +118,7 @@ export function renderAnswer(
         answer_html: (answer.parts ?? [])
           .map(
             (part) =>
-              `<strong>${escape(part.label)})</strong> ${renderMath(part.answer.value_latex)}`
+              `<strong>${escapeMarkup(part.label)})</strong> ${renderMath(part.answer.value_latex)}`
           )
           .join('<span class="mx-2 text-faint">·</span>'),
       };
@@ -160,15 +161,3 @@ export function renderAnswer(
   }
 }
 
-const HTML_ESCAPES: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-/** Ids and labels are model-authored and land in markup, so they get escaped. */
-function escape(text: string): string {
-  return text.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
-}

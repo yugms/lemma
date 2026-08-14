@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { Check, Eye, Layers, Play, Printer, ScanLine, Timer, X } from "lucide-react";
 import { ShareLink } from "@/components/share/share-link";
 import { getCurrentUser } from "@/lib/auth-server";
-import { loadSetForUser } from "@/lib/sets";
+import { loadSetForUser } from "@/lib/sets-read";
 import { loadSetProgress } from "@/lib/progress";
 import { renderProse } from "@/lib/math-render";
 import { Prose } from "@/components/latex";

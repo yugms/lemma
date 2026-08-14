@@ -68,7 +68,7 @@ export type LimitKind = keyof typeof DAILY_LIMITS;
  * the site is broken, and they have no way to tell it isn't; every refusal is
  * logged so a real one shows up before anybody has to report it.
  *
- * One rule holds the burst numbers up, and `production.test.ts` pins it: each
+ * One rule holds the burst numbers up, and `limits.test.ts` pins it: each
  * must sit comfortably above the *per-user* daily cap for the same thing. Below
  * that line, one student working hard on a school connection spends the whole
  * network's allowance and locks out the room — which is the same outcome as an

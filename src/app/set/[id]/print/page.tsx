@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/auth-server";
-import { loadSetForUser } from "@/lib/sets";
+import { loadSetForUser } from "@/lib/sets-read";
 import { loadAnswerKey } from "@/lib/print-key";
 import { prepareProblem } from "@/lib/math-render";
 import { Prose } from "@/components/latex";
@@ -74,7 +74,7 @@ export default async function PrintPage({
           </Link>
         </div>
         {wantsKey && (
-          <p className="aside-rule border-bad mt-7 py-1 text-sm text-bad">
+          <p className="aside-rule-bad mt-7">
             The answer key prints on its own page at the end. On screen it
             follows the questions — fold it away if you are working from this.
             Don&apos;t hand this copy out.

@@ -1,7 +1,19 @@
 /**
  * Loading placeholders. Each mirrors the shape of the page it stands in for,
  * so the real content lands in the same place and nothing shifts.
+ *
+ * "Mirrors" is the trap: a placeholder that copies the real component's class
+ * list character for character stops matching it the first time the real one
+ * changes, and nothing fails when it does. So the shapes that have a real
+ * component compose it, and the one geometry that can't be composed —
+ * the builder's row grid, which belongs to a `"use client"` module a loading
+ * file must not pull in — is a shared constant instead.
  */
+import { StatGrid } from "@/components/stat-grid";
+
+/** The builder's label-left, controls-right row. */
+export const SPEC_ROW =
+  "grid gap-4 border-b border-line py-8 sm:grid-cols-[8.5rem_1fr] sm:gap-10";
 
 function Bar({ className }: { className: string }) {
   return <div className={`skeleton ${className}`} />;
@@ -58,5 +70,23 @@ export function LoadingAnnouncement({ children }: { children: string }) {
     <span role="status" aria-live="polite" className="sr-only">
       {children}
     </span>
+  );
+}
+
+/** The headline tiles, in the real grid so the two can't drift apart. */
+export function StatGridSkeleton({ tiles = 4, columns = 4 }: { tiles?: number; columns?: 3 | 4 }) {
+  return (
+    // Hidden rather than labelled: `LoadingAnnouncement` is what a screen
+    // reader should hear, not four empty tiles.
+    <div aria-hidden>
+      <StatGrid label="" columns={columns}>
+        {Array.from({ length: tiles }, (_, i) => (
+          <div key={i} className="bg-surface px-5 py-6">
+            <Bar className="h-2.5 w-16" />
+            <Bar className="mt-4 h-7 w-20" />
+          </div>
+        ))}
+      </StatGrid>
+    </div>
   );
 }

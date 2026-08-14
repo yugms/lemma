@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { supabasePublishableKey, supabaseUrl } from "@/lib/env";
+import { isDevelopment, supabasePublishableKey, supabaseUrl } from "@/lib/env";
 import { contentSecurityPolicy, newNonce } from "@/lib/csp";
 import { authCookieOptions } from "@/lib/supabase/cookie-options";
 
@@ -9,7 +9,7 @@ export async function proxy(request: NextRequest) {
   const csp = contentSecurityPolicy({
     nonce,
     supabaseOrigin: new URL(supabaseUrl()).origin,
-    isDev: process.env.NODE_ENV === "development",
+    isDev: isDevelopment(),
   });
 
   /**

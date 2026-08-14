@@ -35,7 +35,6 @@
   --on-solid: #faf7f0;
 
   --accent: #7a1f2b;
-  --accent-hover: #94263a;
   --accent-solid: #7a1f2b;
   --accent-on: #fdf6f2;
   --accent-line: #dcc0bd;
@@ -76,7 +75,6 @@
     --on-solid: #0e0c0a;
 
     --accent: #e4808c;
-    --accent-hover: #f09aa4;
     --accent-solid: #a32a3c;
     --accent-on: #fff2f1;
     --accent-line: #5c2730;
@@ -117,7 +115,6 @@
   --on-solid: #0e0c0a;
 
   --accent: #e4808c;
-  --accent-hover: #f09aa4;
   --accent-solid: #a32a3c;
   --accent-on: #fff2f1;
   --accent-line: #5c2730;
@@ -139,7 +136,6 @@
 @theme inline {
   --color-paper: var(--paper);
   --color-surface: var(--surface);
-  --color-raised: var(--raised);
   --color-sunk: var(--sunk);
 
   --color-fg: var(--fg);
@@ -150,8 +146,6 @@
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
 
-  --color-solid: var(--solid);
-  --color-on-solid: var(--on-solid);
 
   --color-accent: var(--accent);
   --color-accent-solid: var(--accent-solid);
@@ -160,11 +154,9 @@
   --color-accent-wash: var(--accent-wash);
 
   --color-ok: var(--ok);
-  --color-ok-line: var(--ok-line);
   --color-ok-wash: var(--ok-wash);
 
   --color-bad: var(--bad);
-  --color-bad-line: var(--bad-line);
   --color-bad-wash: var(--bad-wash);
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
@@ -367,19 +359,6 @@
     box-shadow:
       0 1px 2px rgb(var(--shadow-color) / 0.04),
       0 8px 24px -12px rgb(var(--shadow-color) / 0.1);
-  }
-
-  /* Hairline that fades at both ends — softer than a full-bleed rule. */
-  .rule-fade {
-    height: 1px;
-    border: 0;
-    background: linear-gradient(
-      to right,
-      transparent,
-      var(--line) 8%,
-      var(--line) 92%,
-      transparent
-    );
   }
 
   /* ── Buttons ──────────────────────────────────────────────────── */
@@ -588,6 +567,104 @@
   .aside-rule-accent {
     border-left-color: var(--accent);
   }
+  /* The "that didn't work" paragraph, which every form in the app renders.
+     It was written out as a utility stack seven times, in four variants that
+     differed only by accident — a stray text size, leading on five of them. */
+  .aside-rule-bad {
+    border-left: 2px solid var(--bad);
+    padding-left: 1rem;
+    padding-block: 0.25rem;
+    font-size: 0.875rem;
+    line-height: 1.625;
+    color: var(--bad);
+  }
+
+  /* The "choose a file" target, in both uploaders. The whole thing is a
+     `<label>` wrapping an `sr-only` input, so the hit area is the box rather
+     than a button beside it. */
+  .dropzone {
+    display: flex;
+    cursor: pointer;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    border: 1px dashed var(--line-strong);
+    border-radius: 3px;
+    padding: 3rem 1.5rem;
+    text-align: center;
+    transition:
+      border-color 0.18s ease,
+      opacity 0.18s ease;
+  }
+  .dropzone:hover {
+    border-color: var(--accent);
+  }
+  /* Mid-upload: not disabled — a `<label>` cannot be — so it is dimmed and its
+     input carries the `disabled` that actually stops a second pick. */
+  .dropzone-busy,
+  .dropzone-busy:hover {
+    border-color: var(--line);
+    opacity: 0.6;
+  }
+
+  /* ── Answer options ───────────────────────────────────────────── */
+
+  /* One selectable option, and the lettered chip that opens it. Both were
+     written out as utility stacks in every format that offers a lettered
+     choice — the chip five times — and every one of those stacks is followed
+     by the correct/wrong/picked border and background utilities, which is the
+     part that legitimately differs. Only the geometry lives here. */
+  .option-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0.875rem 1rem;
+    text-align: left;
+    transition: all 200ms;
+  }
+  .option-key {
+    display: flex;
+    height: 1.5rem;
+    width: 1.5rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 2px;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--fg-muted);
+    transition:
+      color 200ms,
+      background-color 200ms,
+      border-color 200ms;
+  }
+
+  /* A server-rendered plot, full-bleed against the card's padding on a phone.
+     48px of extra width is 14% more space between lattice points, which is the
+     only lever that makes the click targets bigger without making them
+     ambiguous — so every plot in the app is framed this way, and the interactive
+     overlays are positioned against it. */
+  .plot-frame {
+    margin-inline: -1.5rem;
+    overflow: hidden;
+    border-block: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .plot-frame > svg {
+    display: block;
+  }
+  @media (min-width: 40rem) {
+    .plot-frame {
+      margin-inline: 0;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+    }
+  }
 
   .badge {
     display: inline-flex;
@@ -753,9 +830,6 @@
   .enter-rise {
     animation: rise-in 0.42s var(--ease-out-expo) both;
   }
-  .enter-fade {
-    animation: fade-in 0.3s ease-out both;
-  }
 
   .stamp {
     animation: stamp-in 0.44s var(--ease-spring) both;
@@ -799,15 +873,6 @@
   to {
     opacity: 1;
     transform: none;
-  }
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
   }
 }
 
@@ -1070,7 +1135,6 @@
     --on-solid: #ffffff;
 
     --accent: #000000;
-    --accent-hover: #000000;
     --accent-solid: #000000;
     --accent-on: #ffffff;
     --accent-line: #bbbbbb;

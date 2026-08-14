@@ -79,7 +79,7 @@ export function OrderingInput({
             <li
               key={id}
               className={clsx(
-                "flex items-center gap-3 rounded-[3px] border px-3 py-3 transition-colors",
+                "flex items-center gap-3 rounded-sm border px-3 py-3 transition-colors",
                 rightHere === true && "border-ok bg-ok-wash",
                 rightHere === false && "border-bad bg-bad-wash",
                 rightHere === null && "border-line bg-surface"
@@ -127,7 +127,7 @@ export function OrderingInput({
                     onClick={() => move(i, -1)}
                     onKeyDown={(e) => onKeyDown(e, i)}
                     aria-label={`Move step ${i + 1} of ${order.length} up`}
-                    className="grid place-items-center rounded-[2px] p-0.5 text-faint transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-faint pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:border pointer-coarse:border-line"
+                    className="grid place-items-center rounded-xs p-0.5 text-faint transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-faint pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:border pointer-coarse:border-line"
                   >
                     <ChevronUp className="h-4 w-4" aria-hidden />
                   </button>
@@ -137,7 +137,7 @@ export function OrderingInput({
                     onClick={() => move(i, 1)}
                     onKeyDown={(e) => onKeyDown(e, i)}
                     aria-label={`Move step ${i + 1} of ${order.length} down`}
-                    className="grid place-items-center rounded-[2px] p-0.5 text-faint transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-faint pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:border pointer-coarse:border-line"
+                    className="grid place-items-center rounded-xs p-0.5 text-faint transition-colors hover:text-accent disabled:opacity-25 disabled:hover:text-faint pointer-coarse:h-10 pointer-coarse:w-10 pointer-coarse:border pointer-coarse:border-line"
                   >
                     <ChevronDown className="h-4 w-4" aria-hidden />
                   </button>
