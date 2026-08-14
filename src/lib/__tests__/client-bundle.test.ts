@@ -5,13 +5,14 @@ import { describe, expect, it } from "vitest";
 /**
  * What the browser is allowed to download.
  *
- * CLAUDE.md states three invariants that keep the client bundle small — KaTeX
+ * CLAUDE.md states four invariants that keep the client bundle small — KaTeX
  * renders in Node, the Supabase SDK is imported at click time, plots are drawn
- * server-side — and until this file, nothing enforced any of them. All three
- * are one stray `import` from being undone, and none of them fails loudly: the
- * app keeps working, the bundle just quietly grows by a few hundred kilobytes.
+ * server-side, and the problem vocabulary lives apart from the schemas — and
+ * until this file, nothing enforced any of them. All four are one stray
+ * `import` from being undone, and none of them fails loudly: the app keeps
+ * working, the bundle just quietly grows by a few hundred kilobytes.
  *
- * That is not hypothetical. `src/lib/ai/schemas.ts` defines 36 top-level zod
+ * That is not hypothetical. `src/lib/ai/schemas.ts` defines 25 top-level zod
  * schemas, and four client components imported a *value* from it — a format
  * list, an exhaustiveness helper — which put 283 kB of zod on seven routes
  * including the landing page. Nobody noticed, because there was nothing to

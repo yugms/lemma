@@ -51,7 +51,7 @@ It runs on Google AI Studio's free tier, so the whole thing costs $0 to operate.
 flowchart LR
   R[Request] --> P["1 · Pool reuse<br/><i>free</i>"]
   P --> T["2 · Templates<br/><i>free, instant</i>"]
-  T --> G["3 · AI authoring<br/><i>batched, per format</i>"]
+  T --> G["3 · AI authoring<br/><i>mixed formats, packed</i>"]
   G --> S{"Structural check<br/>KaTeX · MCQ · blanks"}
   S -->|fail| X[Discard]
   S -->|pass| V["Independent re-solve<br/><i>statement only</i>"]
@@ -66,7 +66,9 @@ flowchart LR
 
 1. **Pool reuse** — already-verified problems matching your request, excluding anything you attempted in the last 30 days, least-served first. Capped at half the set.
 2. **Templates** — seeded-RNG parametrized generators. The answer is computed, not claimed, so they skip verification entirely.
-3. **AI generation** — one batched authoring call per format, then verification fanned out at a bounded concurrency.
+3. **AI generation** — the requested mix of formats packed into as few authoring calls as it fits in, with verification of each batch starting the moment that batch lands. Authoring and verification share one concurrency budget.
+
+The packing is the whole ballgame on a free tier that meters *requests per day* rather than tokens: a call costs about the same whatever it carries, so the number of calls a set makes is what decides how many sets a day exist. Splitting per format instead made a six-problem set cost twelve requests; it now costs three.
 
 Two budgets exist because a short set beats no set: a 230s build deadline stops *starting* new rounds inside the route's 300s limit, and capacity failures break out of the loop with whatever was already gathered rather than throwing.
 
@@ -94,13 +96,18 @@ Everything runs on one shared free model quota, so each account is bounded per d
 |---|---|---|
 | Generated sets (only those costing a model call) | 5 | 20 |
 | Worksheet scans | 5 | 20 |
+| Study materials | 3 | 10 |
 | Review sets · shared-set copies | 10 · 10 | 10 · 10 |
 | Model-assisted marking | 60 | 200 |
 
 Over the marking budget your answer is still graded — locally — and only the written diagnosis is withheld. That is the same degradation that already happens when the provider is unreachable, which is why it is safe to reach deliberately.
 
+**There is a second layer, per network.** Anonymous sessions are issued by Supabase straight to the browser, so a per-account cap only bounds casual overuse — someone minting fresh guest accounts gets a fresh allowance each time. `IP_LIMITS` in the same file adds a burst window and a daily ceiling per address, checked through the `rate_check` RPC against a `rate_events` table. The address comes from `x-vercel-forwarded-for` in preference to `x-forwarded-for`, since only the former is stamped at the edge and cannot be chosen by the caller, and it is stored as a salted hash rather than an address.
+
+The two layers fail in opposite directions, deliberately. A per-account cap that cannot read its own count **refuses**, because it is the only thing between one account and unbounded model spend. The per-network check **allows**, because it sits behind a bound that is already working, and refusing would make every set in the app depend on one more table being healthy.
+
 > [!NOTE]
-> Anonymous sessions are issued by Supabase straight to the browser, so nothing in this codebase sees them and per-user caps only bound casual overuse. Farming fresh guest accounts is held off by two things outside the caps: Supabase's own IP rate limit (30/hour by default, a dashboard setting) and the Turnstile check below.
+> Those numbers err generous. A classroom or library behind one address looks exactly like a script, and a false positive there reads to a student as the site being broken — so every refusal is logged, and the daily figures are the place to tune.
 
 ### Guest sign-up protection
 
@@ -118,7 +125,7 @@ It is **off unless `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set**: with no key nothin
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 20.9+ (what Next 16 requires; CI runs 22)
 - A [Supabase](https://supabase.com) project (free tier)
 - A [Google AI Studio](https://aistudio.google.com/apikey) API key (free, no card)
 
@@ -146,7 +153,7 @@ Then add your deployed origin under **Authentication → URL Configuration** (Si
 > None of this is visible from the code, so when sign-in fails, read `error_code` in the Supabase auth logs first. `src/lib/auth-errors.ts` maps those codes to the copy shown on `/signin`, and the callback forwards the real code rather than a generic flag precisely so the page can name the cause.
 
 > [!IMPORTANT]
-> There is no local database and no SQL in this repo. The schema lives in the Supabase project's migration history (`catalog`, `problems`, `sets_attempts_uploads`, `rls_and_storage`, `seed_catalog`, `bump_times_served_fn`, `lock_down_bump_times_served`, `harden_rls_client_read_only`, `study_sessions_and_coach_reads`, `add_problem_formats`, `attempt_retries`, `catalog_foundations_geometry_stats`). Inspect and change it through the Supabase MCP server configured in `.mcp.json`.
+> There is no local database and no SQL in this repo. The schema lives in the Supabase project's migration history — run `list_migrations` through the Supabase MCP server configured in `.mcp.json` to see it, and `apply_migration` to change it. An enumeration here would go stale the first time a migration was applied, which is exactly what happened to the one this replaced.
 
 ### Environment variables
 
@@ -156,16 +163,28 @@ Then add your deployed origin under **Authentication → URL Configuration** (Si
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes | Same page. The current key format — the legacy `anon` JWT is deprecated |
 | `SUPABASE_SECRET_KEY` | yes | "Secret keys" → create one. **Server-only, bypasses RLS** |
 | `GEMINI_API_KEY` | yes | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| `NEXT_PUBLIC_SITE_URL` | no | The canonical origin: metadata base, Open Graph and canonical URLs, and the host in `robots.txt` / `sitemap.xml`. Unset, `siteUrl()` falls back to Vercel's own `VERCEL_PROJECT_PRODUCTION_URL`, then `VERCEL_URL`, then `http://localhost:3000` — so a Vercel deploy is correct with nothing configured. Auth does **not** use it; sign-in derives its redirect from `window.location.origin` |
-| `GEMINI_GENERATOR_MODELS` | no | `gemini-3.5-flash,gemini-3.6-flash,gemini-2.5-flash` |
-| `GEMINI_CHECKER_MODELS` | no | `gemini-3.5-flash-lite,gemini-2.5-flash-lite,gemini-2.5-flash` |
-| `GEMINI_CONCURRENCY` | no | `3` — free-tier limits are around 10 RPM |
+| `NEXT_PUBLIC_SITE_URL` | no | The canonical origin: metadata base, Open Graph and canonical URLs, and the host in `robots.txt` / `sitemap.xml`. See the note below on where it sits in the order. Auth does **not** use it; sign-in derives its redirect from `window.location.origin` |
+| `GEMINI_GENERATOR_MODELS` | no | `gemini-3.5-flash,gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
+| `GEMINI_CHECKER_MODELS` | no | `gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest` |
+| `GEMINI_CONCURRENCY` | no | `6` — the whole build's budget against free-tier limits of around 10 RPM, shared by authoring and verification |
+| `GEMINI_PROBLEMS_PER_CALL` | no | `6` — problems per authoring call. A request-count dial, not a latency one |
+| `GEMINI_SOLVES_PER_CALL` | no | `5` — problems per verification call. Deliberately smaller: a long shared context is where a solver starts pattern-matching between problems instead of solving each |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | no | Cloudflare Turnstile site key. Unset, the guest-sign-up check is off entirely and nothing is loaded. Must be set **before** enabling CAPTCHA in Supabase — see [Guest sign-up protection](#guest-sign-up-protection) |
 
-The two model variables are comma-separated **preference-ordered chains**: later entries are tried only when earlier ones are rate-limited or overloaded, because free-tier Flash models return 503 in bursts.
+The two model variables are comma-separated **preference-ordered chains**: later entries are tried only when earlier ones are rate-limited or overloaded, because free-tier Flash models return 503 in bursts. The strong models lead and the lites catch what falls through — which only works if the tail is alive, and once wasn't: `gemini-2.5-flash` sat at the end of both chains and had started answering 404, so the fallback that was supposed to absorb a rate-limited flash absorbed nothing.
 
 > [!TIP]
 > Only Flash and Flash-Lite tiers are free. Pointing these at a Pro model works, but stops being free.
+
+**`siteUrl()` resolves the canonical origin in this order**, and the first branch is the one that matters:
+
+1. `VERCEL_ENV === "preview"` with `VERCEL_URL` — **a preview describes itself, ahead of anything configured.** `NEXT_PUBLIC_SITE_URL` is set once per Vercel project and applies to every environment, so with it checked first every preview deployment answered with the production origin: a `robots.txt` pointing at the real sitemap, canonicals claiming the real pages, and a link to a preview unfurling as the live site.
+2. `NEXT_PUBLIC_SITE_URL`
+3. `VERCEL_PROJECT_PRODUCTION_URL` — the project's production domain
+4. `VERCEL_URL` — this specific deployment
+5. `http://localhost:3000`, with a warning
+
+So a Vercel deploy is correct with nothing configured. It warns rather than throwing on the last step, because throwing would fail a plain `npm run build` on a developer's machine — but **nothing in that chain may ever produce a host the deployment does not serve**, which is what the hardcoded fallback it replaced did.
 
 ### Commands
 
@@ -189,7 +208,7 @@ npx vitest run -t "normalizeMath"               # one test by name
 - **`formats.test.ts`** — the per-format round trip: author → split into DB columns → grade → render → print. Keyed off `PROBLEM_FORMATS`, so a new format without a fixture fails here rather than in production.
 - **`disclosure.test.ts`** — the rule deciding whether the answer key is in a response, stated as an invariant: across every mode and prior state, nothing both offers a retry and discloses the answer.
 - **`coach-plan.test.ts`** — targeted-set configuration. A security boundary as much as a feature: `focus.directives` reaches a model prompt verbatim, so this asserts what comes out is always buildable and that mistake notes are flattened before they land inside a quoted string.
-- **`production.test.ts`** — the CSP builder, the daily-limit table, `siteUrl()` resolution order, sign-in error copy, the share-code guard, and the robots.txt crawler policy.
+- **`security-headers.test.ts`, `env.test.ts`, `limits.test.ts`** and their smaller siblings (`robots`, `age-gate`, `account-summary`, `auth-errors`, `share-code`) — the pieces that only matter once real people are using this, each named for what it pins. They all fail quietly in production: a CSP that drops a directive still returns 200, a cap with the wrong sign lets everything through, a loose share-code regex sends arbitrary strings to the database.
 - **`client-bundle.test.ts`** — that no client component can statically reach zod, KaTeX, the model SDK or the Supabase browser SDK. Four prose rules that nothing enforced until one of them broke and put 283 kB of zod on the landing page.
 - **`materials.test.ts`** — what an uploaded document is allowed to become. The digest is the only route from a file to an authoring prompt, and every bound on it is applied in code rather than by the schema, so this is the thing that enforces them.
 - **`material-pool.test.ts`** — that problems written from one student's upload cannot collide with the shared pool. `status` alone looks sufficient and isn't; the upsert would overwrite it in either direction.
@@ -197,7 +216,7 @@ npx vitest run -t "normalizeMath"               # one test by name
 - **`plot.test.ts`** — plot geometry and SVG output, which is a pure string.
 - **`scan.test.ts`** — the "not attempted" rule that keeps a blank from being recorded as a miss.
 - **`provider-schema.test.ts`** — asserts no schema sent to a model contains `$ref` / `$defs` / `$schema`. Gemini only supports `$ref` in non-required properties, and a regression fails at request time with an opaque 400.
-- **`live-provider.test.ts`** and **`live-account.test.ts`** — hit the real API and the real database, and self-skip without their key, so `npm run test` stays offline:
+- **The six `live-*.test.ts` files** hit the real API or the real database and each self-skips without its key, which is what keeps `npm run test` offline. They cover the claims no mock can make: `live-provider` (a model answers, and in the requested shape), `live-batching` (what a set actually costs in requests — the thing the free tier meters), `live-nondrill` (the production failure where every non-drill style came back empty), `live-material` and `live-material-build` (what a model does with a hostile page, and that a material build leaves the shared pool untouched), and `live-account` (all three deletion levels, against throwaway users it creates and removes). The first five need `GEMINI_API_KEY`; `live-account` needs `SUPABASE_SECRET_KEY`. Run one with the env file loaded:
 
   ```bash
   node --env-file=.env.local ./node_modules/vitest/vitest.mjs run src/lib/__tests__/live-provider.test.ts
@@ -279,10 +298,12 @@ The policy names four processors: Supabase, Vercel, Google and Cloudflare. If yo
 
 ## Notes for contributors
 
-A few invariants here are easy to break silently and none of them fail loudly:
+A few invariants here are easy to break silently and none of them fail loudly. The first four keep the client bundle small, and each is one stray `import` from being undone — `client-bundle.test.ts` is what turns that into a failing test rather than a few hundred quiet kilobytes:
 
 - **KaTeX must never reach the browser.** `src/lib/math-render.ts` runs it in Node; `src/components/latex.tsx` only injects the resulting HTML. Importing `katex` from a Client Component adds ~275 kB.
 - **The Supabase browser SDK is lazily imported.** Auth is resolved server-side and passed down as a plain prop; `@/lib/auth` is `await import(...)`-ed at the point of a click. A top-level import puts ~64 kB gzipped back on every route.
+- **Plots are drawn in Node too.** `src/lib/plot.ts` renders a declarative spec to an SVG string. A plot is a fixed stimulus that never animates, so it doesn't justify a charting library on the client; the geometry half is pure arithmetic and *is* shared with the interactive overlays, so the drawn axes and the click targets agree by construction.
+- **The problem vocabulary lives apart from the schemas.** Client components import formats, styles and the exhaustiveness guards from `src/lib/ai/kinds.ts`, never from `schemas.ts` — importing a single *value* from the latter put 283 kB of zod on seven routes, including the landing page.
 - **Failure paths degrade, they don't throw** — partial sets, discarded problems, `null` returns. Keep that when adding pipeline steps.
 - **Correctness is never colour alone.** Every ok/bad state pairs colour with an icon and a word, and the oxblood accent never appears inside a graded answer region.
 - **This is not the Next.js you know.** Read the relevant guide in `node_modules/next/dist/docs/` before writing route code; `params` are Promises and `middleware` is now `proxy.ts`.
