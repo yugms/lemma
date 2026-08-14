@@ -1,7 +1,8 @@
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SolverResult } from "@/lib/ai/schemas";
 import { normalizeAuthored } from "@/tools/seed-pool/authored";
-import { attemptCap, childEnv, pickCells, rotate } from "@/tools/seed-pool/auto";
+import { attemptCap, cellDir, childEnv, pickCells, rotate } from "@/tools/seed-pool/auto";
 import type { PoolRow, TopicRow } from "@/tools/seed-pool/plan";
 import {
   deferringEquivalence,
@@ -403,11 +404,67 @@ describe("attemptCap", () => {
 describe("childEnv", () => {
   // A nested `claude -p` that inherits the parent session's variables does not
   // fail, it hangs — which reads as a slow model rather than a bad spawn.
-  it("clears the parent session's variables and keeps everything else", () => {
+  it("clears the parent session's variables and keeps the ordinary ones", () => {
     const out = childEnv({ ...process.env, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli" });
     expect(out.CLAUDECODE).toBeUndefined();
     expect(out.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
     expect(out.PATH).toBe(process.env.PATH);
+  });
+
+  /**
+   * The author writes one JSON file into the directory it was started in. It
+   * has no use for a key that bypasses RLS on the table holding every answer in
+   * the app, and handing it one is a grant nothing asked for.
+   */
+  it("keeps the run's credentials out of the subprocess", () => {
+    const out = childEnv({
+      ...process.env,
+      SUPABASE_SECRET_KEY: "sb-secret",
+      GEMINI_API_KEY: "g-key",
+      TURNSTILE_SECRET_KEY: "t-secret",
+    });
+    expect(out.SUPABASE_SECRET_KEY).toBeUndefined();
+    expect(out.GEMINI_API_KEY).toBeUndefined();
+    expect(out.TURNSTILE_SECRET_KEY).toBeUndefined();
+  });
+
+  // Matched on the name, so a secret added to `.env.local` next year is not
+  // inherited silently by a list nobody thought to update.
+  it("clears a credential it has never heard of", () => {
+    const out = childEnv({ ...process.env, STRIPE_SECRET_KEY: "x", SOME_SERVICE_TOKEN: "y" });
+    expect(out.STRIPE_SECRET_KEY).toBeUndefined();
+    expect(out.SOME_SERVICE_TOKEN).toBeUndefined();
+  });
+
+  // Stripping these doesn't contain the child, it stops it running.
+  it("leaves `claude` its own way of authenticating", () => {
+    const out = childEnv({
+      ...process.env,
+      ANTHROPIC_API_KEY: "ak",
+      CLAUDE_CODE_OAUTH_TOKEN: "ot",
+    });
+    expect(out.ANTHROPIC_API_KEY).toBe("ak");
+    expect(out.CLAUDE_CODE_OAUTH_TOKEN).toBe("ot");
+  });
+});
+
+describe("cellDir", () => {
+  it("names a cell after its topic and level", () => {
+    expect(cellDir(".seed", "integer-operations", 3)).toBe(
+      join(".seed", "auto", "integer-operations-d3")
+    );
+  });
+
+  /**
+   * The path this returns is `rmSync`'d recursively and forcibly, and the slug
+   * in it comes from a database column. A `..` there would move the delete
+   * somewhere nobody would think to look for it.
+   */
+  it("refuses a slug that would climb out of the workspace", () => {
+    expect(() => cellDir(".seed", "../../..", 3)).toThrow(/refusing/);
+    expect(() => cellDir(".seed", "a/../../b", 3)).toThrow(/refusing/);
+    expect(() => cellDir(".seed", "C:\\Windows", 3)).toThrow(/refusing/);
+    expect(() => cellDir(".seed", "", 3)).toThrow(/refusing/);
   });
 });
 

@@ -121,6 +121,8 @@ It also stops itself if something is actually broken: three cells in a row that 
 
 It needs the `claude` CLI on `PATH` and signs in however that CLI already does. Nothing about the pipeline changes: the same briefs, the same `structuralCheck` and `solverGates`, the same `insertProblems`.
 
+The subprocess it spawns gets `Read`, `Write` and `Edit` — no shell — and none of your keys. The run itself needs `SUPABASE_SECRET_KEY` and `GEMINI_API_KEY`; the author and the checker write a JSON file into the directory they were started in and need neither, so `childEnv` strips anything credential-named out of what they inherit and leaves only what `claude` uses to sign in.
+
 **Coverage is systematic rather than exhaustive per batch.** A cell is one topic at one difficulty; each visit asks for a rotating slice of the styles and formats, because a dozen problems spread over four styles and eight formats is one or two of each at the worst possible request count. Depth is still measured over the *whole* requested vocabulary, so a cell keeps coming back until it is stocked across all of it. `drill` is left out by default — templates already serve it free and deterministically.
 
 **`--verify` is the one real choice.** `gemini` (the default) checks each batch with `solveBatch` — the pipeline's own solver, a different model that never sees the workspace, at roughly three requests per twelve problems. `claude` spends no provider quota at all and is weaker: an author and a checker that are the same model share their blind spots, which is the same objection that makes Gemini-writes-Gemini-checks worth distrusting in the first place. The isolation there is a directory holding the statements and nothing else, plus a brief that says so — not a sandbox.
