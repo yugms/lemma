@@ -102,6 +102,25 @@ Two things it does not do. It does not help **targeted or material sets** — th
 
 `.seed/` is gitignored, deliberately rather than incidentally: between `plan` and `ingest` it holds answer keys for problems about to be served.
 
+#### Running it unattended
+
+`auto` is the same three steps in a loop, with `claude -p` in the author's chair. It censuses the pool, ranks the (topic, difficulty) cells it is thinnest at, and works down the list until the clock stops it.
+
+```bash
+npm run seed -- auto --minutes 60 --styles word,conceptual --formats mcq,open
+npm run seed -- auto --course "Algebra 1" --difficulty 3,4 --jobs 2   # narrower, faster
+```
+
+It needs the `claude` CLI on `PATH` and signs in however that CLI already does. Nothing about the pipeline changes: the same briefs, the same `structuralCheck` and `solverGates`, the same `insertProblems`.
+
+**`--verify` is the one real choice.** `gemini` (the default) checks each batch with `solveBatch` — the pipeline's own solver, a different model that never sees the workspace, at roughly three requests per twelve problems. `claude` spends no provider quota at all and is weaker: an author and a checker that are the same model share their blind spots, which is the same objection that makes Gemini-writes-Gemini-checks worth distrusting in the first place. The isolation there is a directory holding the statements and nothing else, plus a brief that says so — not a sandbox.
+
+The requests `gemini` verification costs are worth putting next to what they buy: a pool problem is authored once and reused for as long as it lives, against the five requests a build spends every time it has to write one from scratch.
+
+A cell is one topic at one difficulty, and depth is counted only over the styles and formats you asked for — the pool query matches those with `IN`, so forty drill/mcq problems are worth nothing to a student asking for a word problem in open form. Expect roughly 3-4 minutes per cell of a dozen problems, most of it authoring, and expect a real rejection rate: the gates reject on genuine disagreement, and they reject more at difficulty 4 than at 2.
+
+Stopping early is safe — every cell is written before the next one starts, and the ranking is deterministic, so a second run picks up where the first stopped rather than repeating it.
+
 ### Practice modes
 
 Each mode is defined by three answers, which the grading route reads from one table (`src/lib/attempt-state.ts`):
@@ -219,7 +238,7 @@ npm run build          # production build
 npm start              # serve the production build
 npm run lint           # eslint (next/core-web-vitals + React Compiler rules)
 npm run test           # vitest — offline tests only
-npm run seed           # pool seeding CLI — `npm run seed -- --help`
+npm run seed           # pool seeding CLI — `npm run seed -- --help`; `-- auto` runs it unattended
 npx tsc --noEmit       # typecheck (no npm script for this)
 ```
 

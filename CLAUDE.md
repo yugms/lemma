@@ -29,6 +29,7 @@ Every one of these fails *silently* — the app keeps working and something is q
 | Enabling CAPTCHA in the Supabase dashboard before setting the site key breaks every guest session | `captcha.ts` |
 | Storage has no cascade from `auth.users`, so files must be swept *before* the row delete | `account.ts` |
 | A seeded problem solved in the context that authored it is stamped `verified` having been verified by nobody | `tools/seed-pool/solve.ts` |
+| A rate-limited `claude -p` waits instead of refusing, so a seeding run without a per-attempt cap spends hours looking busy | `tools/seed-pool/auto.ts` |
 
 ## Commands
 
@@ -255,6 +256,14 @@ Three smaller decisions:
 - **A prose answer is deferred, never resolved to `false`.** `solverAgrees` ends at "do these two mean the same thing?" for every `text` answer, which is every `proof`, `conceptual` and `error_analysis` problem. Live that goes to a model; here it is written to `.seed/adjudicate.json` and the next `ingest` picks it up. Answering it `false` in the meantime is the exact bug that once rejected 100% of prose-answered problems while drill looked fine, so `judgeAll` reports those as `deferred` rather than `rejected` — the distinction is what `deferringEquivalence` exists for.
 
 It writes `status: "active"`, so it stocks ordinary builds only: `bespoke()` sets skip pool reuse by design. And it can only usefully write non-`drill` problems, since templates already serve `drill` for free.
+
+**`auto` (`auto.ts`) is those three steps in a loop with `claude -p` as the author**, ranking cells by how thin the pool is and working down until a wall-clock budget stops it. It adds the loop, the ranking and the subprocess, and nothing else — `writeAuthoringBrief`, `normalizeAuthored`, `writeSolvingBrief`, `judgeAll` and `insertProblems` are the same functions the manual commands call. Five decisions in it are non-obvious:
+
+- **`--verify gemini` is the default, and it is not the cheap option.** `solveBatch` is a different model that never sees the workspace, so the independence is structural rather than requested; `--verify claude` spends no quota and is weaker for the same reason Gemini-checks-Gemini is. What makes the requests worth spending is that a pool problem is authored once and reused for as long as it lives, against five requests every time a build writes one.
+- **Depth is counted over the requested styles and formats, not per cell.** The pool query matches those with `IN` and only difficulty with `=`, so forty drill/mcq rows are worth nothing to a student asking for a word problem in open form — and ranking on the raw total sends the whole run back to the deepest cells.
+- **The per-invocation timeout is derived from what is left of the run** (`attemptCap`), for the same reason the provider's is. A rate-limited subscription does not refuse; `claude -p` waits, indistinguishable from a long batch. One observed invocation ran 2.5 hours inside a 20-minute run — and resolving on the kill's `close` rather than on the timer is what let it, since `close` waits for every inherited stdio pipe.
+- **A cell's outcome is decided by the file, not the exit code.** An author that wrote `authored.json` and then wedged has done the expensive part.
+- **The subprocess gets `Read,Write,Edit` and deliberately not `Bash`**, and the child environment has the parent session's `CLAUDE*` variables cleared (`childEnv`) — a nested `claude -p` that inherits them hangs rather than failing, which reads as a slow model.
 
 ### Next.js 16 specifics in use
 

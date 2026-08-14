@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SolverResult } from "@/lib/ai/schemas";
 import { normalizeAuthored } from "@/tools/seed-pool/authored";
+import { attemptCap, childEnv, pickCells } from "@/tools/seed-pool/auto";
+import type { PoolRow, TopicRow } from "@/tools/seed-pool/plan";
 import {
   deferringEquivalence,
   equivalenceKey,
@@ -289,6 +291,95 @@ describe("selectAll", () => {
   it("surfaces a read error rather than reporting a short pool", async () => {
     const page = vi.fn().mockResolvedValue({ data: null, error: { message: "nope" } });
     await expect(selectAll<number>(page, 3)).rejects.toThrow("nope");
+  });
+});
+
+describe("pickCells", () => {
+  const topic = (slug: string): TopicRow => ({
+    id: slug,
+    slug,
+    title: slug,
+    description: null,
+    units: null,
+  });
+  const row = (over: Partial<PoolRow> = {}): PoolRow => ({
+    topic_id: "a",
+    difficulty: 2,
+    style: "word",
+    format: "open",
+    ...over,
+  });
+  const want = {
+    difficulties: [2],
+    styles: ["word"] as const,
+    formats: ["open"] as const,
+    target: 3,
+  };
+
+  it("leaves out a cell that already has the target depth", () => {
+    const pool = [row(), row(), row()];
+    expect(pickCells([topic("a")], pool, { ...want, styles: [...want.styles], formats: [...want.formats] })).toEqual([]);
+  });
+
+  /**
+   * The reason depth is counted per request rather than per cell. The pool
+   * query matches style and format with `IN`, so forty drill/mcq problems are
+   * worth nothing to a student asking for a word problem in open form — and
+   * ranking on the raw total would spend the whole run on the deepest cells.
+   */
+  it("does not count problems a build asking for these styles could not reuse", () => {
+    const pool = [row({ style: "drill" }), row({ format: "mcq" }), row({ difficulty: 3 })];
+    const cells = pickCells([topic("a")], pool, {
+      ...want,
+      styles: [...want.styles],
+      formats: [...want.formats],
+    });
+    expect(cells).toHaveLength(1);
+    expect(cells[0].depth).toBe(0);
+  });
+
+  // Ties broken deterministically so a run stopped at twenty minutes and
+  // started again picks up where it left off rather than repeating itself.
+  it("orders thinnest first, then by slug and level", () => {
+    const cells = pickCells([topic("b"), topic("a")], [row({ topic_id: "a" })], {
+      ...want,
+      difficulties: [2, 3],
+      styles: [...want.styles],
+      formats: [...want.formats],
+    });
+    expect(cells.map((c) => `${c.topic.slug}${c.difficulty}`)).toEqual(["a3", "b2", "b3", "a2"]);
+  });
+});
+
+describe("attemptCap", () => {
+  /**
+   * A rate-limited subscription does not refuse, it waits — one invocation sat
+   * for two and a half hours inside a twenty-minute run. A ceiling that outlives
+   * the budget it sits under is not a ceiling.
+   */
+  it("never lets one invocation outlast what is left of the run", () => {
+    expect(attemptCap(Date.now() + 5 * 60_000)).toBeLessThanOrEqual(5 * 60_000);
+  });
+
+  it("caps a generous budget rather than handing over the whole hour", () => {
+    expect(attemptCap(Date.now() + 60 * 60_000)).toBe(15 * 60_000);
+  });
+
+  // Below the floor there is no point starting, but a cell already under way
+  // gets the floor rather than a timeout it cannot possibly meet.
+  it("floors an almost-spent budget", () => {
+    expect(attemptCap(Date.now())).toBe(3 * 60_000);
+  });
+});
+
+describe("childEnv", () => {
+  // A nested `claude -p` that inherits the parent session's variables does not
+  // fail, it hangs — which reads as a slow model rather than a bad spawn.
+  it("clears the parent session's variables and keeps everything else", () => {
+    const out = childEnv({ ...process.env, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli" });
+    expect(out.CLAUDECODE).toBeUndefined();
+    expect(out.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+    expect(out.PATH).toBe(process.env.PATH);
   });
 });
 

@@ -10,6 +10,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildUserMessage, splitAcrossKinds, type TopicInfo } from "@/lib/ai/generate";
+import type { GenerationKind } from "@/lib/ai/kinds";
 import { GENERATOR_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { jsonSchemaFor } from "@/lib/ai/provider";
 import { MixedBatchSchema, type ProblemFormat, type ProblemStyle } from "@/lib/ai/schemas";
@@ -22,7 +23,7 @@ import {
   type SeedPlan,
 } from "@/tools/seed-pool/shared";
 
-type TopicRow = {
+export type TopicRow = {
   id: string;
   slug: string;
   title: string;
@@ -89,15 +90,19 @@ const tally = <T>(rows: T[], key: (r: T) => string): Map<string, number> => {
  * takes half its slots from the pool ordered by `times_served`, so a cell with
  * three problems in it serves the same three to everyone.
  */
+export async function loadCatalog(db: SupabaseClient, course?: string): Promise<TopicRow[]> {
+  const { data, error } = await db.from("topics").select(TOPIC_COLUMNS);
+  if (error) throw new Error(`topic lookup failed: ${error.message}`);
+  return (data as unknown as TopicRow[]).filter(
+    (t) => !course || t.units?.courses?.title === course
+  );
+}
+
 export async function runCensus(
   db: SupabaseClient,
   opts: { course?: string; target: number }
 ): Promise<void> {
-  const { data, error } = await db.from("topics").select(TOPIC_COLUMNS);
-  if (error) throw new Error(`topic lookup failed: ${error.message}`);
-  const all = (data as unknown as TopicRow[]).filter(
-    (t) => !opts.course || t.units?.courses?.title === opts.course
-  );
+  const all = await loadCatalog(db, opts.course);
   if (all.length === 0) {
     console.log(opts.course ? `No topics in course "${opts.course}".` : "No topics in the catalog.");
     return;
@@ -139,63 +144,98 @@ export async function runCensus(
 const describe = (counts: Map<string, number>) =>
   [...counts].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(", ") || "none";
 
-export type PlanOptions = {
-  slugs: string[];
+const AVOID_LIMIT = 120;
+
+/**
+ * What the pool already holds for these topics at this level, as statements.
+ *
+ * This is the whole reason the planning step talks to the database. Authoring
+ * blind is how you spend an afternoon writing the pool's twelve most common
+ * problems for the second time — and `insertProblems` upserts on the content
+ * hash, so the second copy doesn't even announce itself.
+ */
+export async function avoidList(
+  db: SupabaseClient,
+  topicIds: string[],
+  difficulty: number
+): Promise<string[]> {
+  const { data, error } = await db
+    .from("problems")
+    .select("content")
+    .in("topic_id", topicIds)
+    .eq("difficulty", difficulty)
+    .eq("status", "active")
+    .limit(AVOID_LIMIT);
+  if (error) throw new Error(`pool read failed: ${error.message}`);
+  return (data ?? [])
+    .map((r) => (r.content as { statement_latex?: string })?.statement_latex ?? "")
+    .filter(Boolean);
+}
+
+export type AuthoringSetup = {
+  topics: TopicRow[];
   difficulty: number;
   count: number;
   styles: ProblemStyle[];
   formats: ProblemFormat[];
+  avoid: string[];
+  /** Where the three files go. */
   dir: string;
+  /**
+   * The command whoever authors this should run next, or `null` when a driver
+   * is running it instead.
+   *
+   * It also decides how the brief names its own files, because the two go
+   * together: `plan` is run from the repo root with its files under `.seed`, so
+   * they have to be qualified, while `auto` runs the author *inside* the
+   * directory, where a qualified path would write a second copy one level down.
+   */
+  next: string | null;
 };
 
-export async function runPlan(db: SupabaseClient, opts: PlanOptions): Promise<void> {
-  const topics = await loadTopics(db, opts.slugs);
-  const infos = topics.map(topicInfo);
-  const ids = topics.map((t) => t.id);
-
-  // Everything already in the pool for these topics at this level goes in as an
-  // avoid list, which is the whole reason this step talks to the database at
-  // all. Authoring blind is how you spend an afternoon writing the pool's
-  // twelve most common problems for the second time.
-  const { data: existing, error } = await db
-    .from("problems")
-    .select("content")
-    .in("topic_id", ids)
-    .eq("difficulty", opts.difficulty)
-    .eq("status", "active")
-    .limit(120);
-  if (error) throw new Error(`pool read failed: ${error.message}`);
-  const avoid = (existing ?? [])
-    .map((r) => (r.content as { statement_latex?: string })?.statement_latex ?? "")
-    .filter(Boolean);
-
-  const mix = new Map(
-    [...splitAcrossKinds(opts.count, opts.formats)].filter(([, wanted]) => wanted > 0)
-  );
+/**
+ * Write the brief, the plan and the schema that one authoring batch needs.
+ *
+ * Shared by `plan` and `auto` rather than reimplemented, on the same argument
+ * as everything else in this tool: the brief is assembled from the live
+ * pipeline's own prompt and request builder, and a driver that assembled its
+ * own would be seeding the pool against a specification that drifts.
+ */
+export function writeAuthoringBrief(s: AuthoringSetup): {
+  plan: SeedPlan;
+  mix: Map<GenerationKind, number>;
+  path: string;
+  /** The same text, so a driver can hand it to a subprocess without a second read. */
+  brief: string;
+} {
+  const at = (name: string) => (s.next === null ? name : `${s.dir}/${name}`);
+  const mix = new Map([...splitAcrossKinds(s.count, s.formats)].filter(([, wanted]) => wanted > 0));
   const request = {
-    topics: infos,
-    count: opts.count,
-    difficulty: opts.difficulty,
-    styles: opts.styles,
-    formats: opts.formats,
-    avoid,
+    topics: s.topics.map(topicInfo),
+    count: s.count,
+    difficulty: s.difficulty,
+    styles: s.styles,
+    formats: s.formats,
+    avoid: s.avoid,
   };
 
   const plan: SeedPlan = {
-    difficulty: opts.difficulty,
-    styles: opts.styles,
-    formats: opts.formats,
-    count: opts.count,
-    topics: topics.map((t) => ({ id: t.id, slug: t.slug, title: t.title })),
+    difficulty: s.difficulty,
+    styles: s.styles,
+    formats: s.formats,
+    count: s.count,
+    topics: s.topics.map((t) => ({ id: t.id, slug: t.slug, title: t.title })),
   };
-  writeJson(opts.dir, FILES.plan, plan);
-  writeJson(opts.dir, FILES.problemSchema, jsonSchemaFor(MixedBatchSchema));
+  writeJson(s.dir, FILES.plan, plan);
+  writeJson(s.dir, FILES.problemSchema, jsonSchemaFor(MixedBatchSchema));
 
   const brief = `# Authoring brief
 
-Write ${opts.count} problems into \`${opts.dir}/${FILES.authored}\`, then run:
-
-    npm run seed -- solve
+${
+  s.next === null
+    ? `Write ${s.count} problems into \`${at(FILES.authored)}\`.`
+    : `Write ${s.count} problems into \`${at(FILES.authored)}\`, then run:\n\n    ${s.next}`
+}
 
 You are the author here. Everything below — the rules, the topics, the format
 mix, the avoid list — is what the live pipeline sends its own authoring model,
@@ -205,9 +245,9 @@ Two things this brief does not say and you should not infer: nothing here is
 addressed to a student, and nothing here asks for problems in the source
 material's wording. Write originals.
 
-Pool depth for these topics at difficulty ${opts.difficulty}: ${avoid.length} problem${
-    avoid.length === 1 ? "" : "s"
-  } already active${avoid.length >= 120 ? " (showing the first 120)" : ""}.
+Pool depth for these topics at difficulty ${s.difficulty}: ${s.avoid.length} problem${
+    s.avoid.length === 1 ? "" : "s"
+  } already active${s.avoid.length >= AVOID_LIMIT ? ` (showing the first ${AVOID_LIMIT})` : ""}.
 
 ## Rules
 
@@ -219,11 +259,11 @@ ${fence(buildUserMessage(request, mix))}
 
 ## Output
 
-Write \`${opts.dir}/${FILES.authored}\` as one JSON object:
+Write \`${at(FILES.authored)}\` as one JSON object:
 
-    { "problems": [ /* ${opts.count} problems */ ] }
+    { "problems": [ /* ${s.count} problems */ ] }
 
-Every problem must validate against \`${opts.dir}/${FILES.problemSchema}\`, which is
+Every problem must validate against \`${at(FILES.problemSchema)}\`, which is
 the exact schema the pipeline validates model output against. Two fields in it
 are worth reading twice, because they are the ones that get silently dropped:
 
@@ -235,7 +275,32 @@ are worth reading twice, because they are the ones that get silently dropped:
   forever.
 `;
 
-  const path = writeFile(opts.dir, FILES.authoringBrief, brief);
+  return { plan, mix, brief, path: writeFile(s.dir, FILES.authoringBrief, brief) };
+}
+
+export type PlanOptions = {
+  slugs: string[];
+  difficulty: number;
+  count: number;
+  styles: ProblemStyle[];
+  formats: ProblemFormat[];
+  dir: string;
+};
+
+export async function runPlan(db: SupabaseClient, opts: PlanOptions): Promise<void> {
+  const topics = await loadTopics(db, opts.slugs);
+  const avoid = await avoidList(
+    db,
+    topics.map((t) => t.id),
+    opts.difficulty
+  );
+  const { mix, path } = writeAuthoringBrief({
+    ...opts,
+    topics,
+    avoid,
+    next: "npm run seed -- solve",
+  });
+
   console.log(`Wrote ${path}`);
   console.log(
     `  ${opts.count} problems, difficulty ${opts.difficulty}, ${topics.length} topic${

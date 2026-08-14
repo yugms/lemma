@@ -13,7 +13,7 @@
  */
 import { SOLVER_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { jsonSchemaFor } from "@/lib/ai/provider";
-import { SolvedBatchSchema } from "@/lib/ai/schemas";
+import { SolvedBatchSchema, type TaggedProblem } from "@/lib/ai/schemas";
 import { solverPrompt } from "@/lib/ai/verify";
 import { loadAuthored, reportDropped } from "@/tools/seed-pool/authored";
 import {
@@ -25,14 +25,21 @@ import {
   type SeedPlan,
 } from "@/tools/seed-pool/shared";
 
-export function runSolve(dir: string): void {
-  const plan = readJson<SeedPlan>(dir, FILES.plan, `run \`npm run seed -- plan\` first`);
-  const { problems, dropped } = loadAuthored(dir, plan);
-  reportDropped(dropped);
-  if (problems.length === 0) {
-    throw new Error(`nothing in ${dir}/${FILES.authored} survived validation`);
-  }
-
+/**
+ * Write the statements-only brief and the schema its answers must match.
+ *
+ * `dir` is deliberately a plain argument rather than the workspace: `auto`
+ * writes this into a directory holding nothing else, so that the solver's
+ * blindness is a property of the filesystem rather than of the paragraph below
+ * asking for it. `next` says who runs the following step, and — as in
+ * `writeAuthoringBrief` — whether the files are named bare or qualified.
+ */
+export function writeSolvingBrief(
+  problems: TaggedProblem[],
+  dir: string,
+  next: string | null
+): { path: string; brief: string } {
+  const at = (name: string) => (next === null ? name : `${dir}/${name}`);
   writeJson(dir, FILES.solverSchema, jsonSchemaFor(SolvedBatchSchema));
 
   const body = problems
@@ -42,9 +49,7 @@ export function runSolve(dir: string): void {
   const brief = `# Solving brief
 
 ${problems.length} problem${problems.length === 1 ? "" : "s"} to solve. Write
-\`${dir}/${FILES.solved}\`, then run:
-
-    npm run seed -- ingest
+\`${at(FILES.solved)}\`${next === null ? "." : `, then run:\n\n    ${next}`}
 
 ## Solve these as if you had never seen them before
 
@@ -78,8 +83,8 @@ ${body}
 
 ## Output
 
-Write \`${dir}/${FILES.solved}\` as one JSON object matching
-\`${dir}/${FILES.solverSchema}\`:
+Write \`${at(FILES.solved)}\` as one JSON object matching
+\`${at(FILES.solverSchema)}\`:
 
     { "results": [ { "problem_number": 1, ... }, ... ] }
 
@@ -89,7 +94,18 @@ of range or used twice is dropped, and a problem left unclaimed is reported and
 skipped rather than paired with its neighbour's solution.
 `;
 
-  const path = writeFile(dir, FILES.solvingBrief, brief);
+  return { brief, path: writeFile(dir, FILES.solvingBrief, brief) };
+}
+
+export function runSolve(dir: string): void {
+  const plan = readJson<SeedPlan>(dir, FILES.plan, `run \`npm run seed -- plan\` first`);
+  const { problems, dropped } = loadAuthored(dir, plan);
+  reportDropped(dropped);
+  if (problems.length === 0) {
+    throw new Error(`nothing in ${dir}/${FILES.authored} survived validation`);
+  }
+
+  const { path } = writeSolvingBrief(problems, dir, "npm run seed -- ingest");
   console.log(`Wrote ${path}`);
   console.log(`  ${problems.length} problem${problems.length === 1 ? "" : "s"}, statements only`);
   console.log(`\nNext: solve them into ${dir}/${FILES.solved}, then \`npm run seed -- ingest\`.`);
