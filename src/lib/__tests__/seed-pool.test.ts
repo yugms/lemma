@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SolverResult } from "@/lib/ai/schemas";
 import { normalizeAuthored } from "@/tools/seed-pool/authored";
-import { attemptCap, childEnv, pickCells } from "@/tools/seed-pool/auto";
+import { attemptCap, childEnv, pickCells, rotate } from "@/tools/seed-pool/auto";
 import type { PoolRow, TopicRow } from "@/tools/seed-pool/plan";
 import {
   deferringEquivalence,
@@ -348,6 +348,34 @@ describe("pickCells", () => {
       formats: [...want.formats],
     });
     expect(cells.map((c) => `${c.topic.slug}${c.difficulty}`)).toEqual(["a3", "b2", "b3", "a2"]);
+  });
+});
+
+describe("rotate", () => {
+  const STYLES = ["word", "conceptual", "proof", "error_analysis"] as const;
+  const FORMATS = ["mcq", "open", "fill_blank", "multi_select", "ordering"] as const;
+
+  it("asks for a slice rather than the whole vocabulary", () => {
+    const { styles, formats } = rotate(0, [...STYLES], [...FORMATS]);
+    expect(styles).toEqual(["word", "conceptual"]);
+    expect(formats).toEqual(["mcq", "open", "fill_blank"]);
+  });
+
+  // The point of rotating at all: over successive visits a topic is approached
+  // from every angle, not repeatedly from the first two.
+  it("reaches every style and every format over successive attempts", () => {
+    const seen = { styles: new Set<string>(), formats: new Set<string>() };
+    for (let i = 0; i < 20; i += 1) {
+      const mix = rotate(i, [...STYLES], [...FORMATS]);
+      mix.styles.forEach((s) => seen.styles.add(s));
+      mix.formats.forEach((f) => seen.formats.add(f));
+    }
+    expect(seen.styles.size).toBe(STYLES.length);
+    expect(seen.formats.size).toBe(FORMATS.length);
+  });
+
+  it("collapses to what there is when asked for one style and one format", () => {
+    expect(rotate(3, ["proof"], ["open"])).toEqual({ styles: ["proof"], formats: ["open"] });
   });
 });
 

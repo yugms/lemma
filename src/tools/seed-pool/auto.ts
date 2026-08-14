@@ -27,8 +27,8 @@
  *   distrusting. Isolation here is the directory and the brief, not a sandbox.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askModelIfEquivalent } from "@/lib/ai/equivalence";
 import type { ProblemFormat, ProblemStyle } from "@/lib/ai/kinds";
@@ -102,6 +102,21 @@ export const attemptCap = (deadline: number) =>
 
 type ClaudeResult = { ok: boolean; detail: string };
 
+/**
+ * Subprocesses currently running, so a hard quit can take them with it.
+ *
+ * Without this, a second Ctrl-C leaves an author per job still running — still
+ * holding a slot against the subscription, still writing into a workspace
+ * nothing is watching any more, and invisible unless you go looking in the task
+ * list for it.
+ */
+const live = new Set<ChildProcessWithoutNullStreams>();
+
+export function killLiveChildren(): void {
+  for (const child of live) child.kill();
+  live.clear();
+}
+
 function runClaude(
   cwd: string,
   prompt: string,
@@ -119,6 +134,7 @@ function runClaude(
       return;
     }
 
+    live.add(child);
     let out = "";
     let err = "";
     let settled = false;
@@ -126,6 +142,7 @@ function runClaude(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      live.delete(child);
       resolve(result);
     };
     // Resolved on the timer rather than on the kill's `close`, which is the bug
@@ -212,6 +229,59 @@ export function pickCells(
   );
 }
 
+/**
+ * How much of the requested vocabulary one batch asks for.
+ *
+ * Not all of it, deliberately. A twelve-problem batch spread over four styles
+ * and eight formats is one or two problems of each, and `splitAcrossKinds`
+ * divides before the mix is packed into calls — so asking for everything at
+ * once buys a thin sample of the cross product at the worst request count. A
+ * narrow slice that *rotates* covers the same ground over successive visits
+ * and packs properly on each one.
+ */
+const STYLES_PER_BATCH = 2;
+const FORMATS_PER_BATCH = 3;
+
+const sliceOf = <T>(xs: T[], offset: number, size: number): T[] =>
+  Array.from({ length: Math.min(size, xs.length) }, (_, k) => xs[(offset + k) % xs.length]);
+
+/**
+ * The slice of styles and formats this attempt asks for.
+ *
+ * Strides are coprime with the list lengths often enough that successive
+ * attempts land on different windows, which is the whole point: over a long run
+ * every topic is approached from every angle rather than repeatedly from the
+ * first two. `pickCells` still measures depth over the *whole* requested
+ * vocabulary, so a cell keeps coming back until it is stocked across all of it.
+ */
+export function rotate(
+  attempt: number,
+  styles: ProblemStyle[],
+  formats: ProblemFormat[]
+): { styles: ProblemStyle[]; formats: ProblemFormat[] } {
+  return {
+    styles: sliceOf(styles, attempt * STYLES_PER_BATCH, STYLES_PER_BATCH),
+    formats: sliceOf(formats, attempt * FORMATS_PER_BATCH, FORMATS_PER_BATCH),
+  };
+}
+
+/**
+ * The file a detached run watches for "please stop".
+ *
+ * A run started in another window, or with its console closed behind it, has no
+ * Ctrl-C to receive — and killing it outright abandons whatever cell is in
+ * flight along with the authoring already paid for. `npm run seed -- stop`
+ * writes this, and the loop finishes what it is holding and exits.
+ */
+export const stopPath = (dir: string) => join(dir, "auto", "stop");
+
+export function requestStop(dir: string): string {
+  const path = stopPath(dir);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, "");
+  return path;
+}
+
 export type AutoOptions = {
   dir: string;
   course?: string;
@@ -223,6 +293,8 @@ export type AutoOptions = {
   count: number;
   target: number;
   minutes: number;
+  /** Run until stopped rather than until `minutes` is up. */
+  forever: boolean;
   jobs: number;
   verify: "gemini" | "claude";
   equivalence: "ai" | "defer";
@@ -250,6 +322,7 @@ async function seedCell(
   db: SupabaseClient,
   cell: Cell,
   opts: AutoOptions,
+  mix: { styles: ProblemStyle[]; formats: ProblemFormat[] },
   deadline: number,
   log: (line: string) => void
 ): Promise<CellOutcome> {
@@ -269,8 +342,8 @@ async function seedCell(
     topics: [cell.topic],
     difficulty: cell.difficulty,
     count: opts.count,
-    styles: opts.styles,
-    formats: opts.formats,
+    styles: mix.styles,
+    formats: mix.formats,
     avoid,
     dir: authorDir,
     next: null,
@@ -325,6 +398,13 @@ async function seedCell(
     rowFromGenerated(j.problem, cell.topic.id, "ai", null, j.verification)
   );
   const inserted = await insertProblems(db, rows);
+
+  // Swept once the problems are safely in the table, and only then. A run over
+  // the whole catalog would otherwise leave several hundred directories of
+  // answer keys and worked solutions behind it, which is the thing `.gitignore`
+  // is protecting and not a state worth accumulating. What stays is what failed
+  // — the only copies anybody has a reason to open.
+  rmSync(root, { recursive: true, force: true });
   return {
     kept,
     inserted: inserted.length,
@@ -370,73 +450,140 @@ export async function runAuto(db: SupabaseClient, opts: AutoOptions): Promise<vo
       `no topics matched — run \`npm run seed -- census\` for the catalog`
     );
   }
-  const cells = pickCells(topics, await loadPool(db), opts);
-  if (cells.length === 0) {
-    console.log(`Every cell is already at ${opts.target}. Raise --target or widen --difficulty.`);
-    return;
-  }
+  // A stop left over from the last run is not this one's instruction.
+  const stop = stopPath(opts.dir);
+  mkdirSync(dirname(stop), { recursive: true });
+  rmSync(stop, { force: true });
 
-  const deadline = Date.now() + opts.minutes * 60_000;
-  console.log(
-    `${cells.length} cell${cells.length === 1 ? "" : "s"} under the target of ${opts.target}, ` +
-      `${opts.count} problems each, checked by ${opts.verify}.`
-  );
-  console.log(
-    `Running for up to ${opts.minutes} min with ${opts.jobs} job${opts.jobs === 1 ? "" : "s"}. ` +
-      `Cells are attempted thinnest first; stopping early is safe.\n`
-  );
-
-  let next = 0;
-  let done = 0;
+  const deadline = opts.forever ? Infinity : Date.now() + opts.minutes * 60_000;
+  let stopped: string | null = null;
   let written = 0;
-  // Three cells in a row that produced nothing is a broken setup, not bad luck
-  // — a missing key, a checker that never runs, a schema that stopped matching.
-  // Left alone it would spend the whole hour discovering that once per cell.
+  let done = 0;
+  let attempt = 0;
+  /**
+   * Two different kinds of nothing, counted apart because they deserve
+   * opposite amounts of patience.
+   *
+   * A cell that authored a dozen problems and had all twelve rejected is the
+   * gates working on a hard patch of the catalog — annoying, not broken, and
+   * the next topic may well be fine. A cell that produced *no problems at all*
+   * is the tool being stuck: no `claude` on PATH, a subscription that has
+   * stopped answering, a schema that no longer matches. Every further attempt
+   * at that costs a full timeout to learn the same thing, so it gives up fast.
+   */
   let barren = 0;
+  let stalled = 0;
+  const STALL_LIMIT = 3;
+  const BARREN_LIMIT = 10;
 
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      // Checked before starting rather than after finishing, on the same
-      // argument as `buildDeadline`: what matters is not beginning work that
-      // cannot land, and a cell abandoned halfway has cost its authoring for
-      // nothing.
-      if (next >= cells.length || Date.now() >= deadline || barren >= 3) return;
-      const cell = cells[next++];
-      const started = Date.now();
-      console.log(`→ ${cell.topic.slug} d${cell.difficulty} (pool has ${cell.depth})`);
-
-      const lines: string[] = [];
-      let outcome: CellOutcome;
-      try {
-        outcome = await seedCell(db, cell, opts, deadline, (line) => lines.push(line));
-      } catch (err) {
-        // One cell's failure is not the run's. A topic whose brief is malformed
-        // or whose insert is rejected should cost that topic, not the other
-        // ninety-nine.
-        outcome = nothing(err instanceof Error ? err.message : String(err));
-      }
-
-      done += 1;
-      written += outcome.inserted;
-      barren = outcome.kept > 0 ? 0 : barren + 1;
-      const secs = Math.round((Date.now() - started) / 1000);
-      for (const line of lines) console.log(line);
-      console.log(
-        `  ${cell.topic.slug} d${cell.difficulty}: ${outcome.kept}/${outcome.authored} kept` +
-          `${outcome.note ? ` — ${outcome.note}` : ""} (${secs}s, ${written} written so far)\n`
-      );
+  const halt = (why: string) => {
+    if (stopped) {
+      killLiveChildren();
+      process.exit(1);
     }
+    stopped = why;
+    console.log(
+      `\n[${why}] finishing the ${opts.jobs === 1 ? "cell" : "cells"} in flight — again to quit now.`
+    );
+  };
+  process.on("SIGINT", () => halt("interrupted"));
+  process.on("SIGTERM", () => halt("terminated"));
+
+  // Checked before starting a cell rather than after finishing one, on the same
+  // argument as `buildDeadline`: what matters is not beginning work that cannot
+  // land, and a cell abandoned halfway has paid for its authoring and got
+  // nothing for it.
+  const reasonToStop = (): string | null => {
+    if (stopped) return stopped;
+    if (Date.now() >= deadline) return `the ${opts.minutes}-minute budget is spent`;
+    if (stalled >= STALL_LIMIT) return `${stalled} cells in a row authored nothing at all`;
+    if (barren >= BARREN_LIMIT) return `${barren} cells in a row kept nothing`;
+    if (existsSync(stop)) return "asked to stop";
+    return null;
   };
 
-  await Promise.all(Array.from({ length: opts.jobs }, worker));
+  console.log(
+    `${opts.count} problems per cell, checked by ${opts.verify}, ${opts.jobs} at a time.\n` +
+      (opts.forever
+        ? `Running until stopped: Ctrl-C, or \`npm run seed -- stop\` from anywhere.`
+        : `Running for up to ${opts.minutes} min; Ctrl-C or \`npm run seed -- stop\` ends it sooner.`)
+  );
 
-  const left = cells.length - next;
-  console.log(`\n${written} problem${written === 1 ? "" : "s"} written across ${done} cell${done === 1 ? "" : "s"}.`);
-  if (barren >= 3) {
+  let target = opts.target;
+  for (let round = 1; ; round += 1) {
+    const why = reasonToStop();
+    if (why) {
+      stopped = why;
+      break;
+    }
+
+    // Re-censused every round rather than once, because the previous round
+    // changed the answer. Without it the loop would keep working the cells that
+    // were thinnest an hour ago.
+    const cells = pickCells(topics, await loadPool(db), { ...opts, target });
+    if (cells.length === 0) {
+      // Covered once at this depth. Deepening rather than stopping is what
+      // "keep going" has to mean past that point, and it deepens the whole
+      // catalog evenly instead of burrowing into whichever topic sorted first.
+      target += opts.target;
+      console.log(`\nEvery cell has reached ${target - opts.target}. Deepening to ${target}.`);
+      continue;
+    }
     console.log(
-      `Stopped after three cells in a row produced nothing — the last few messages above say why.`
+      `\n== round ${round}: ${cells.length} cell${cells.length === 1 ? "" : "s"} under ${target} ==\n`
     );
-  } else if (left > 0) {
-    console.log(`${left} cell${left === 1 ? "" : "s"} still under target. Run it again to continue.`);
+
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        if (next >= cells.length) return;
+        const ending = reasonToStop();
+        if (ending) {
+          stopped = ending;
+          return;
+        }
+        const cell = cells[next++];
+        const mix = rotate(attempt++, opts.styles, opts.formats);
+        const started = Date.now();
+        console.log(
+          `→ ${cell.topic.slug} d${cell.difficulty} (has ${cell.depth}) ` +
+            `${mix.styles.join("/")} · ${mix.formats.join("/")}`
+        );
+
+        const lines: string[] = [];
+        let outcome: CellOutcome;
+        try {
+          outcome = await seedCell(db, cell, opts, mix, deadline, (line) => lines.push(line));
+        } catch (err) {
+          // One cell's failure is not the run's. A topic whose brief is
+          // malformed or whose insert is rejected should cost that topic, not
+          // the other hundred.
+          outcome = nothing(err instanceof Error ? err.message : String(err));
+        }
+
+        done += 1;
+        written += outcome.inserted;
+        barren = outcome.kept > 0 ? 0 : barren + 1;
+        stalled = outcome.authored > 0 ? 0 : stalled + 1;
+        const secs = Math.round((Date.now() - started) / 1000);
+        for (const line of lines) console.log(line);
+        console.log(
+          `  ${cell.topic.slug} d${cell.difficulty}: ${outcome.kept}/${outcome.authored} kept` +
+            `${outcome.note ? ` — ${outcome.note}` : ""} (${secs}s, ${written} written so far)\n`
+        );
+      }
+    };
+
+    await Promise.all(Array.from({ length: opts.jobs }, worker));
+  }
+
+  rmSync(stop, { force: true });
+  console.log(
+    `\n${written} problem${written === 1 ? "" : "s"} written across ${done} cell${done === 1 ? "" : "s"} — ${stopped}.`
+  );
+  if (stalled >= STALL_LIMIT || barren >= BARREN_LIMIT) {
+    console.log(`The last few messages above say why nothing was landing.`);
+  } else {
+    console.log(`Run it again whenever; it re-censuses and picks up where this left off.`);
   }
 }

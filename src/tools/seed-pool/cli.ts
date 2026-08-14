@@ -26,7 +26,7 @@
 import { parseArgs } from "node:util";
 import { PROBLEM_FORMATS, PROBLEM_STYLES } from "@/lib/ai/kinds";
 import { createServiceClient } from "@/lib/supabase/service";
-import { runAuto } from "@/tools/seed-pool/auto";
+import { requestStop, runAuto } from "@/tools/seed-pool/auto";
 import { runCensus, runPlan } from "@/tools/seed-pool/plan";
 import { runIngest } from "@/tools/seed-pool/ingest";
 import { runSolve } from "@/tools/seed-pool/solve";
@@ -50,21 +50,35 @@ const USAGE = `Seed the shared problem pool offline.
   npm run seed -- ingest [--dry-run] [--equivalence defer|ai]
       Judge the solutions and write what passes into the pool as \`active\`.
 
-  npm run seed -- auto [--minutes 60] [options]
-      All three, in a loop, with \`claude -p\` as the author. Picks whichever
-      (topic, difficulty) cells the pool is thinnest at and works down.
+  npm run seed -- auto [--forever] [options]
+      All three, in a loop, with \`claude -p\` as the author. Re-censuses each
+      round, works the thinnest (topic, difficulty) cells first, and rotates
+      the styles and formats it asks for so the catalog fills evenly.
+      --forever               keep going until stopped (otherwise --minutes)
       --minutes N             stop starting cells after this long (default 60)
       --jobs N                cells at once (default 1; 2-3 is usually fine)
       --verify gemini|claude  who checks the work (default gemini)
-      --target N              depth a cell counts as stocked at (default 12)
-      --difficulty <list>     levels to fill, e.g. 2,3,4 (default 2,3,4)
+      --target N              depth a cell counts as stocked at (default 12);
+                              once every cell reaches it, the loop deepens
+      --difficulty <list>     levels to fill (default 1,2,3,4,5)
       --topics <list>         only these slugs (default: the whole catalog)
-      --course, --count, --styles, --formats, --dry-run as above
+      --styles  <list>        default: every style but drill, which templates
+                              already serve for free
+      --formats <list>        default: every format
+      --course, --count, --dry-run as above
+
+      Each cell asks for a rotating slice of those styles and formats rather
+      than all of them at once — a dozen problems spread over four styles and
+      eight formats is one or two of each at the worst request count.
 
       \`gemini\` checks with the pipeline's own solver: a different model that
       never sees the workspace, at about three requests per twelve problems.
       \`claude\` spends no provider quota and is weaker — an author and a
       checker that are the same model share their blind spots.
+
+  npm run seed -- stop
+      Ask a running \`auto\` to finish its current cell and exit. For a run
+      started in another window, where there is no Ctrl-C to send it.
 
   Common: --dir <path>        workspace (default ${DEFAULT_DIR})
 
@@ -103,6 +117,7 @@ async function main(): Promise<void> {
       jobs: { type: "string" },
       verify: { type: "string" },
       model: { type: "string" },
+      forever: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
@@ -160,14 +175,23 @@ async function main(): Promise<void> {
         dir: dir(),
         course: values.course,
         slugs: values.topics ? splitList(values.topics) : undefined,
-        difficulties: splitList(values.difficulty ?? "2,3,4").map((d) =>
+        difficulties: splitList(values.difficulty ?? "1,2,3,4,5").map((d) =>
           positiveInt(d, 2, "difficulty", 5)
         ),
-        styles: parseEnumList(values.styles ?? "drill", PROBLEM_STYLES, "styles"),
-        formats: parseEnumList(values.formats ?? "mcq,open", PROBLEM_FORMATS, "formats"),
+        // Every style but `drill` and every format, because the loop rotates a
+        // slice of them per cell and the whole list is what it rotates through.
+        // `drill` is left out on purpose: templates already serve it for free
+        // and deterministically, so authoring it buys nothing.
+        styles: parseEnumList(
+          values.styles ?? PROBLEM_STYLES.filter((s) => s !== "drill").join(","),
+          PROBLEM_STYLES,
+          "styles"
+        ),
+        formats: parseEnumList(values.formats ?? PROBLEM_FORMATS.join(","), PROBLEM_FORMATS, "formats"),
         count: positiveInt(values.count, 12, "count", 60),
         target: positiveInt(values.target, 12, "target", 1000),
         minutes: positiveInt(values.minutes, 60, "minutes", 24 * 60),
+        forever: values.forever ?? false,
         jobs: positiveInt(values.jobs, 1, "jobs", 8),
         verify,
         // Prose answers are the case local comparison can never settle, and in
@@ -178,6 +202,14 @@ async function main(): Promise<void> {
         model: values.model,
         dryRun: values["dry-run"] ?? false,
       });
+    }
+
+    // No database client and no flags of its own: it writes one file that a
+    // running loop is watching for, so it works from any window on the machine.
+    case "stop": {
+      console.log(`Wrote ${requestStop(dir())}`);
+      console.log(`A running \`auto\` will finish its current cell and exit.`);
+      return;
     }
 
     default:
