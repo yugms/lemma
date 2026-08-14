@@ -45,6 +45,11 @@ yarn-error.log*
 # Marketing renders — megabytes of mp4 and stills that no build reads.
 /ads
 
+# Pool-seeding workspace (`npm run seed`). Between `plan` and `ingest` it holds
+# full answer keys and worked solutions for problems about to be served, so it
+# is ignored rather than merely untracked.
+/.seed
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

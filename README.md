@@ -77,6 +77,31 @@ The route has three branches into that pipeline. **Manual** takes the builder fo
 > [!NOTE]
 > Every model call in the app goes through one function, `callStructured()` in `src/lib/ai/provider.ts`. It returns `null` for unusable output (callers must degrade) and throws only when the entire model chain is rate-limited. Swapping providers is a change to that one file.
 
+### Seeding the pool by hand
+
+Step 1 is the only free slot in a build, and today it only fills as a side effect of builds that already paid for it. `npm run seed` stocks it deliberately — the authoring and the checking are done by whoever runs the tool, not by the provider, so the problems cost daily quota nothing and every set that reuses them is cheaper for good.
+
+Three steps, with a file between each:
+
+```bash
+npm run seed -- census                       # what the pool holds, per topic and difficulty
+npm run seed -- plan --topics multi-step-linear --difficulty 3 --count 12 \
+                     --styles word,conceptual --formats mcq,open
+# author .seed/authored.json from .seed/authoring-brief.md
+npm run seed -- solve                        # writes the statements, with no answers
+# solve them into .seed/solved.json
+npm run seed -- ingest [--dry-run]           # gates them, writes what passes as `active`
+```
+
+The briefs are assembled from `GENERATOR_SYSTEM_PROMPT`, `buildUserMessage` and `solverPrompt` — the same code paths the live pipeline uses — and `ingest` runs `structuralCheck` and `solverGates`, not a copy of them. A seeded problem clears exactly the bar a generated one clears.
+
+> [!IMPORTANT]
+> **Solve in a context that has not seen the answers.** `.seed/authored.json` holds the key, the worked solution and the distractor rationales, and the solve step exists to disagree with them. Run it fresh — it needs no database and no key, which is what makes that easy. Solving in the session that authored the batch produces a verified stamp on an unverified problem, and nothing downstream re-checks it.
+
+Two things it does not do. It does not help **targeted or material sets** — those skip pool reuse by design, and pay the AI cost for every slot. And it writes no `drill` you couldn't have had for free: templates already serve that style deterministically, so the cells worth your own time are the non-drill ones the census marks thin.
+
+`.seed/` is gitignored, deliberately rather than incidentally: between `plan` and `ingest` it holds answer keys for problems about to be served.
+
 ### Practice modes
 
 Each mode is defined by three answers, which the grading route reads from one table (`src/lib/attempt-state.ts`):
@@ -194,6 +219,7 @@ npm run build          # production build
 npm start              # serve the production build
 npm run lint           # eslint (next/core-web-vitals + React Compiler rules)
 npm run test           # vitest — offline tests only
+npm run seed           # pool seeding CLI — `npm run seed -- --help`
 npx tsc --noEmit       # typecheck (no npm script for this)
 ```
 
@@ -254,6 +280,7 @@ src/
 │   ├── worksheets.ts    # scan uploads and their grading
 │   ├── account.ts       # the three levels of data deletion
 │   └── math-render.ts   # KaTeX, server-side only
+├── tools/seed-pool/     # `npm run seed` — stock the pool offline, no provider call
 └── proxy.ts             # Next 16's renamed middleware — session refresh + CSP nonce
 ```
 

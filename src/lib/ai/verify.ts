@@ -37,8 +37,13 @@ export { structuralCheck };
  * Split out from `solveIndependently` so a batched solve shows each problem
  * exactly what a solo solve would. Two ways of describing a problem to the
  * checker would drift, and the one that drifted would be the one used least.
+ *
+ * Exported for the same reason it was split out. `src/tools/seed-pool` puts
+ * these statements in a file for a human-driven solver instead of a model call,
+ * and a brief that described a problem its own way would be verifying something
+ * subtly different from what the pipeline verifies.
  */
-function solverPrompt(p: GeneratedProblem): string {
+export function solverPrompt(p: GeneratedProblem): string {
   let statement = p.statement_latex;
   switch (p.format) {
     case "mcq":

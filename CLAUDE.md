@@ -28,6 +28,7 @@ Every one of these fails *silently* — the app keeps working and something is q
 | A nonce on `style-src` *disables* `'unsafe-inline'` rather than adding to it | `proxy.ts` |
 | Enabling CAPTCHA in the Supabase dashboard before setting the site key breaks every guest session | `captcha.ts` |
 | Storage has no cascade from `auth.users`, so files must be swept *before* the row delete | `account.ts` |
+| A seeded problem solved in the context that authored it is stamped `verified` having been verified by nobody | `tools/seed-pool/solve.ts` |
 
 ## Commands
 
@@ -37,6 +38,7 @@ npm run build          # next build
 npm start              # next start — serve the production build
 npm run lint           # eslint
 npm run test           # vitest run (offline tests only)
+npm run seed           # pool-seeding CLI; `npm run seed -- --help`
 npx tsc --noEmit       # typecheck — there is no npm script for this
 
 npx vitest run src/lib/__tests__/core.test.ts   # one test file
@@ -237,6 +239,22 @@ Deletes use the service client with a `userId` resolved server-side, never one p
 ### Templates
 
 `src/lib/templates/` holds deterministic parametrized generators: seeded RNG in, a full `GeneratedProblem` out, so they are free and skip AI verification entirely (`verification: { method: "computed" }`). To add one, implement `Template` and register it in the `templates` array in `index.ts`. `topicSlugs` must match `topics.slug` values in the DB catalog — a typo silently disables the template. Templates only serve the `drill` style. `core.test.ts` structurally validates every template across seeds, difficulties, and formats.
+
+### Seeding the pool offline
+
+`src/tools/seed-pool/` (`npm run seed`) is the other way to fill step 1. Templates are free because they're computed; pool problems are free because somebody already paid for them, and until now the only somebody was a build. This lets the pool be stocked deliberately, with the authoring and the checking done by whoever runs the tool.
+
+**Nothing in it reimplements the pipeline, and that is the whole design.** The briefs come from `GENERATOR_SYSTEM_PROMPT` + `buildUserMessage` + `solverPrompt`, `ingest` calls `structuralCheck` and `solverGates`, and the write goes through `insertProblems`. Four things were exported to make that possible rather than copied — that is the trade, and it is the right one: a second authoring specification would drift, a second set of gates would be the easier one to pass, and a second writer would reimplement the `ON CONFLICT` collapse it exists to avoid.
+
+**The three steps are separate processes because the check has to be blind.** `.seed/authored.json` holds the key, the worked solution and the distractor rationales; `solve` writes out the statements alone and needs no database and no key, precisely so it can be run somewhere that has never seen them. Run it in the session that authored the batch and it will agree with itself, the gates will pass, and `verification.status = "verified"` will be written on a problem nothing verified. That is the sharpest trap here and the tool cannot detect it.
+
+Three smaller decisions:
+
+- **`method: "offline-independent-solve"`**, not the pipeline's `"independent-solve"`. Same check, different hands, and the column is the only record of which — anything ever found wrong with a batch seeded this way is findable by that string and by nothing else.
+- **No repair pass.** `verifyOrRepair` spends a call rewriting a disagreed-with problem because a live build has a student waiting and a slot to fill. Nothing is waiting here, so a disagreement prints both answers and discards.
+- **A prose answer is deferred, never resolved to `false`.** `solverAgrees` ends at "do these two mean the same thing?" for every `text` answer, which is every `proof`, `conceptual` and `error_analysis` problem. Live that goes to a model; here it is written to `.seed/adjudicate.json` and the next `ingest` picks it up. Answering it `false` in the meantime is the exact bug that once rejected 100% of prose-answered problems while drill looked fine, so `judgeAll` reports those as `deferred` rather than `rejected` — the distinction is what `deferringEquivalence` exists for.
+
+It writes `status: "active"`, so it stocks ordinary builds only: `bespoke()` sets skip pool reuse by design. And it can only usefully write non-`drill` problems, since templates already serve `drill` for free.
 
 ### Next.js 16 specifics in use
 
