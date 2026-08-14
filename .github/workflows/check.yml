@@ -1,0 +1,32 @@
+name: Check
+
+# Every commit is supposed to typecheck and pass the suite on its own, so the
+# stack stays bisectable. Nothing enforced that until this file — a broken
+# commit only showed up when someone bisected onto it.
+#
+# `npm run test` is the offline suite: the live-provider and live-account files
+# self-skip without their keys, which is what keeps CI free of API spend.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npx tsc --noEmit
+
+      - run: npm run test
