@@ -6,6 +6,18 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 **README.md is the setup and product document** — install, environment variables, Supabase dashboard configuration, the CAPTCHA rollout procedure, the route map, the limits table. It is the better copy of all of that; this file does not repeat it. What follows is the reasoning a change has to survive.
 
+## Reporting your work
+
+**The person you are reporting to does not read the codebase.** Every change to it is made through Claude Code, so a diff, a file path or a symbol name is not something they can go and check — it is something they have to take on trust. These documents can be as dense as they need to be. **What you write in chat cannot.**
+
+- **Lead with what changed and what it means**, in ordinary words. "The seeding tool was handing its helper the database password" lands; "`childEnv` only stripped `SESSION_VARS`" does not.
+- **Assume no shorthand is shared.** RLS, upsert, SSE, `bespoke()`, the pool — each is either explained in the same breath or left out.
+- **Name a file only when it is the answer to a likely next question**, and then one or two, not a tour of the diff.
+- **Say what could break and how likely it is**, because nobody downstream is reading the code to find out. "Tested, works" and "should work, untested" must never look the same.
+- **Plain version first, detail after, clearly separated**, so it can be stopped as soon as it's understood. Detail is welcome underneath; it is not welcome as the way in.
+
+None of this means being vague. Say the true thing simply — an explanation that leaves out the risk to sound tidy is worse than jargon.
+
 ## Traps
 
 Every one of these fails *silently* — the app keeps working and something is quietly wrong. Each names the file that explains it.
