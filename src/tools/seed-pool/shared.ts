@@ -132,12 +132,52 @@ export function fence(body: string): string {
   return `${bar}\n${body}\n${bar}`;
 }
 
+const quoteArg = (value: string) =>
+  /[\s"]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+
+/**
+ * How to invoke the next step, carrying `--dir` when the workspace isn't the
+ * default one.
+ *
+ * Both briefs and both "Next:" lines name the following command, and a run
+ * under `--dir` has to say so. `npm run seed -- ingest` on its own reads
+ * `.seed`, where it finds none of the work that was just done and reports the
+ * previous step as never having happened — which is a confusing way to be told
+ * you typed the right thing in the wrong workspace.
+ */
+export function seedCommand(step: string, dir: string): string {
+  const base = `npm run seed -- ${step}`;
+  return dir === DEFAULT_DIR ? base : `${base} --dir ${quoteArg(dir)}`;
+}
+
 /** `a,b , c` -> `["a","b","c"]`, dropping the empties a trailing comma leaves. */
 export function splitList(raw: string): string[] {
   return raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/**
+ * `--difficulty 1,3,5` -> `[1, 3, 5]`, refusing an empty list.
+ *
+ * `pickCells` iterates the difficulties, so none of them means no cells — and
+ * `auto` reads no cells as "every cell has reached the target" and raises the
+ * target. Under `--forever` that is a loop announcing a fresh round for as long
+ * as it is left alone and authoring nothing, out of a flag as ordinary as
+ * `--difficulty ""`. Deduplicated for the same reason `parseEnumList` is: a
+ * repeated level is a repeated cell, authored twice onto one content hash.
+ */
+export function parseDifficulties(raw: string): number[] {
+  const values = splitList(raw).map((d) => {
+    const n = Number(d);
+    if (!Number.isInteger(n) || n < 1 || n > 5) {
+      throw new Error(`--difficulty takes whole numbers from 1 to 5 (got "${d}")`);
+    }
+    return n;
+  });
+  if (values.length === 0) throw new Error(`--difficulty needs at least one level from 1 to 5`);
+  return [...new Set(values)];
 }
 
 /**

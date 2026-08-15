@@ -17,6 +17,7 @@ import { MixedBatchSchema, type ProblemFormat, type ProblemStyle } from "@/lib/a
 import {
   fence,
   FILES,
+  seedCommand,
   selectAll,
   writeFile,
   writeJson,
@@ -301,12 +302,8 @@ export async function runPlan(db: SupabaseClient, opts: PlanOptions): Promise<vo
     topics.map((t) => t.id),
     opts.difficulty
   );
-  const { mix, path } = writeAuthoringBrief({
-    ...opts,
-    topics,
-    avoid,
-    next: "npm run seed -- solve",
-  });
+  const next = seedCommand("solve", opts.dir);
+  const { mix, path } = writeAuthoringBrief({ ...opts, topics, avoid, next });
 
   console.log(`Wrote ${path}`);
   console.log(
@@ -316,5 +313,5 @@ export async function runPlan(db: SupabaseClient, opts: PlanOptions): Promise<vo
   );
   console.log(`  mix: ${[...mix].map(([k, n]) => `${n}x ${k}`).join(", ")}`);
   console.log(`  avoid list: ${avoid.length} statement${avoid.length === 1 ? "" : "s"}`);
-  console.log(`\nNext: author ${opts.dir}/${FILES.authored}, then \`npm run seed -- solve\`.`);
+  console.log(`\nNext: author ${opts.dir}/${FILES.authored}, then \`${next}\`.`);
 }

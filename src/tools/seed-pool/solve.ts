@@ -22,6 +22,7 @@ import {
   FILES,
   readJson,
   readJsonIfPresent,
+  seedCommand,
   writeFile,
   writeJson,
   type SeedPlan,
@@ -159,8 +160,9 @@ export function runSolve(dir: string): void {
     throw new Error(`nothing in ${dir}/${FILES.authored} survived validation`);
   }
 
-  const { path } = writeSolvingBrief(problems, dir, "npm run seed -- ingest");
+  const next = seedCommand("ingest", dir);
+  const { path } = writeSolvingBrief(problems, dir, next);
   console.log(`Wrote ${path}`);
   console.log(`  ${problems.length} problem${problems.length === 1 ? "" : "s"}, statements only`);
-  console.log(`\nNext: solve them into ${dir}/${FILES.solved}, then \`npm run seed -- ingest\`.`);
+  console.log(`\nNext: solve them into ${dir}/${FILES.solved}, then \`${next}\`.`);
 }

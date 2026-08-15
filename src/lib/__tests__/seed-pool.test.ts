@@ -15,7 +15,14 @@ import {
   pairSolved,
   type Pending,
 } from "@/tools/seed-pool/ingest";
-import { parseEnumList, selectAll, splitList } from "@/tools/seed-pool/shared";
+import {
+  DEFAULT_DIR,
+  parseDifficulties,
+  parseEnumList,
+  seedCommand,
+  selectAll,
+  splitList,
+} from "@/tools/seed-pool/shared";
 import type { SeedPlan } from "@/tools/seed-pool/shared";
 
 /**
@@ -439,6 +446,23 @@ describe("childEnv", () => {
     expect(out.SOME_SERVICE_TOKEN).toBeUndefined();
   });
 
+  /**
+   * A DSN carries a password in the middle of a URL and admits nothing in its
+   * name, so the name pattern alone would hand it over intact.
+   */
+  it("clears a credential the name gives no sign of", () => {
+    const out = childEnv({
+      ...process.env,
+      DATABASE_URL: "postgres://admin:hunter2@db.example.com:5432/app",
+      PGCONN: "host=db.example.com password=hunter2",
+      HARMLESS_URL: "https://example.com/health",
+    });
+    expect(out.DATABASE_URL).toBeUndefined();
+    expect(out.PGCONN).toBeUndefined();
+    // ...without sweeping up a URL that carries no credential.
+    expect(out.HARMLESS_URL).toBe("https://example.com/health");
+  });
+
   // Stripping these doesn't contain the child, it stops it running.
   it("leaves `claude` its own way of authenticating", () => {
     const out = childEnv({
@@ -567,9 +591,48 @@ describe("cellDir", () => {
   });
 });
 
+describe("seedCommand", () => {
+  it("says nothing about the workspace when it is the default one", () => {
+    expect(seedCommand("ingest", DEFAULT_DIR)).toBe("npm run seed -- ingest");
+  });
+
+  /**
+   * Without this the printed next step reads the default workspace, finds none
+   * of the work just done, and reports the previous step as never having
+   * happened — a confusing way to be told you typed the right thing in the
+   * wrong place.
+   */
+  it("carries a custom workspace through to the next step", () => {
+    expect(seedCommand("solve", "/tmp/pool")).toBe("npm run seed -- solve --dir /tmp/pool");
+  });
+
+  it("quotes a path with a space in it", () => {
+    expect(seedCommand("ingest", "C:\\my pool")).toBe(`npm run seed -- ingest --dir "C:\\my pool"`);
+  });
+});
+
 describe("flag parsing", () => {
   it("drops the empties a trailing comma leaves", () => {
     expect(splitList("a, b ,")).toEqual(["a", "b"]);
+  });
+
+  /**
+   * `pickCells` iterates the difficulties, so an empty list means no cells —
+   * which `auto` reads as "everything is stocked", raises the target, and under
+   * `--forever` repeats for as long as it is left running.
+   */
+  it("refuses a difficulty list that parsed to nothing", () => {
+    expect(() => parseDifficulties("")).toThrow(/at least one/);
+    expect(() => parseDifficulties(" , ")).toThrow(/at least one/);
+  });
+
+  it("takes the levels it was given, once each", () => {
+    expect(parseDifficulties("3, 1 ,3")).toEqual([3, 1]);
+  });
+
+  it("rejects a level outside the rubric", () => {
+    expect(() => parseDifficulties("1,6")).toThrow(/1 to 5/);
+    expect(() => parseDifficulties("2.5")).toThrow(/1 to 5/);
   });
 
   it("names the allowed values when one is misspelled", () => {

@@ -30,7 +30,13 @@ import { requestStop, runAuto } from "@/tools/seed-pool/auto";
 import { runCensus, runPlan } from "@/tools/seed-pool/plan";
 import { runIngest } from "@/tools/seed-pool/ingest";
 import { runSolve } from "@/tools/seed-pool/solve";
-import { DEFAULT_DIR, parseEnumList, splitList, workspace } from "@/tools/seed-pool/shared";
+import {
+  DEFAULT_DIR,
+  parseDifficulties,
+  parseEnumList,
+  splitList,
+  workspace,
+} from "@/tools/seed-pool/shared";
 
 const USAGE = `Seed the shared problem pool offline.
 
@@ -175,9 +181,7 @@ async function main(): Promise<void> {
         dir: dir(),
         course: values.course,
         slugs: values.topics ? splitList(values.topics) : undefined,
-        difficulties: splitList(values.difficulty ?? "1,2,3,4,5").map((d) =>
-          positiveInt(d, 2, "difficulty", 5)
-        ),
+        difficulties: parseDifficulties(values.difficulty ?? "1,2,3,4,5"),
         // Every style but `drill` and every format, because the loop rotates a
         // slice of them per cell and the whole list is what it rotates through.
         // `drill` is left out on purpose: templates already serve it for free

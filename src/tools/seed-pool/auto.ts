@@ -91,11 +91,30 @@ const SESSION_VARS = [
 const SECRET_NAME = /KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL/i;
 const OWN_AUTH = /^(?:ANTHROPIC|CLAUDE)/i;
 
+/**
+ * The second half, matched on the *value*, for credentials whose names don't
+ * admit to holding one.
+ *
+ * `DATABASE_URL` and every DSN beside it carry a password in the middle of a
+ * URL and match none of the words above. Reading the value catches them however
+ * they are named, which is the only way to cover a variable this repo hasn't
+ * introduced yet.
+ *
+ * A strict allowlist would be stronger still and was the obvious alternative,
+ * but `claude` on Windows needs a good deal more than `PATH` and `HOME` —
+ * `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `SystemRoot`, `COMSPEC`, `TEMP`,
+ * `PATHEXT` at least — and an allowlist that turns out to be one variable short
+ * fails as a cell that authored nothing, three of which end the run. That is a
+ * poor trade against a tool meant to be left alone for hours.
+ */
+const SECRET_VALUE = /:\/\/[^/\s:@]+:[^/\s@]+@|(?:password|passwd|pwd)=/i;
+
 export function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out = { ...env };
   for (const name of SESSION_VARS) delete out[name];
   for (const name of Object.keys(out)) {
-    if (SECRET_NAME.test(name) && !OWN_AUTH.test(name)) delete out[name];
+    if (OWN_AUTH.test(name)) continue;
+    if (SECRET_NAME.test(name) || SECRET_VALUE.test(out[name] ?? "")) delete out[name];
   }
   return out;
 }
@@ -122,6 +141,9 @@ const ALLOWED_TOOLS = "Read,Write,Edit";
  */
 const MAX_CLAUDE_MS = 15 * 60_000;
 const MIN_CLAUDE_MS = 3 * 60_000;
+
+/** How long a timed-out child gets to honour SIGTERM before SIGKILL. */
+const KILL_GRACE_MS = 5_000;
 
 export const attemptCap = (deadline: number) =>
   Math.min(MAX_CLAUDE_MS, Math.max(MIN_CLAUDE_MS, deadline - Date.now()));
@@ -164,13 +186,28 @@ function runClaude(
     let out = "";
     let err = "";
     let settled = false;
+    let graceTimer: NodeJS.Timeout | undefined;
     const finish = (result: ClaudeResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      live.delete(child);
       resolve(result);
     };
+    /**
+     * Forgotten when the process is actually gone, which is *not* the moment
+     * `finish` runs.
+     *
+     * A timed-out child is reported immediately below and may still be running.
+     * Dropping it from `live` there — which is what used to happen — put it
+     * beyond the reach of `killLiveChildren`, so the second Ctrl-C that exists
+     * to take the subprocesses with it would sail straight past the one child
+     * that had already proved it doesn't stop when asked.
+     */
+    const forget = () => {
+      live.delete(child);
+      clearTimeout(graceTimer);
+    };
+    child.on("exit", forget);
     // Resolved on the timer rather than on the kill's `close`, which is the bug
     // the 2.5-hour run above was: `close` waits for every inherited stdio pipe,
     // so a child that survives the signal — or leaves one behind — holds the
@@ -178,6 +215,11 @@ function runClaude(
     const timer = setTimeout(() => {
       finish({ ok: false, detail: `timed out after ${Math.round(opts.timeoutMs / 60_000)} min` });
       child.kill();
+      // SIGTERM asks; a child wedged mid-write need not answer. Windows lands
+      // both signals as the same forced terminate, so the escalation only earns
+      // its keep on POSIX — the grace period costs nothing either way, and the
+      // tracking above is what matters on the platform this actually runs on.
+      graceTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
     }, opts.timeoutMs);
     const cap = (s: string, chunk: unknown) => (s.length > 20_000 ? s : s + String(chunk));
 
@@ -185,7 +227,10 @@ function runClaude(
     child.stderr.on("data", (d) => (err = cap(err, d)));
     // `claude` not being on PATH is worth naming outright: it would otherwise
     // repeat once per cell for the length of the run.
-    child.on("error", (e) => finish({ ok: false, detail: `could not run \`claude\`: ${e.message}` }));
+    child.on("error", (e) => {
+      forget();
+      finish({ ok: false, detail: `could not run \`claude\`: ${e.message}` });
+    });
     child.on("close", (code) =>
       finish(
         code === 0
@@ -193,6 +238,18 @@ function runClaude(
           : { ok: false, detail: `exit ${code}: ${err.trim().slice(-400) || out.trim().slice(-400)}` }
       )
     );
+    // A child that exits before reading its brief — an unauthenticated
+    // `claude`, a flag it rejects — leaves this write going into a closed pipe.
+    // An unhandled `error` on a stream is an uncaught exception, so without a
+    // listener here one cell's bad start takes the whole run down with it
+    // instead of costing itself. EPIPE is swallowed rather than reported: it
+    // says only that the child is gone, and `close` is about to say why, with
+    // the exit code and whatever it managed to write to stderr.
+    child.stdin.on("error", (e: NodeJS.ErrnoException) => {
+      if (e.code !== "EPIPE") {
+        finish({ ok: false, detail: `could not send the brief: ${e.message}` });
+      }
+    });
     child.stdin.end(prompt);
   });
 }
