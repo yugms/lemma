@@ -4,7 +4,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 @AGENTS.md
 
-**README.md is the setup and product document** — install, environment variables, Supabase dashboard configuration, the CAPTCHA rollout procedure, the route map, the limits table. It is the better copy of all of that; this file does not repeat it. What follows is the reasoning a change has to survive.
+**README.md is the product document and `docs/` holds the operational detail** — `docs/self-hosting.md` (environment variables, Supabase dashboard configuration, the CAPTCHA rollout, rate limiting), `docs/architecture.md` (the pipeline, the route map, the test inventory), `docs/pool-seeding.md` (`npm run seed`), `SECURITY.md` (the client-is-hostile model, headers, accepted advisor findings). Those are the better copy of all of that; this file does not repeat them. What follows is the reasoning a change has to survive.
 
 ## Reporting your work
 
@@ -182,7 +182,7 @@ Note that `NEXT_PUBLIC_*` inlining only works for a *literal* `process.env.NAME`
 
 Auth is anonymous-by-default: `ensureUser()` calls `signInAnonymously()`, and Google sign-in uses `linkIdentity()` so the user id — and therefore all history — survives the upgrade. Three call sites route everything: `build-run.tsx`, `add-shared-set.tsx`, `bucket-upload.ts`. A guest's identity lives only in their session cookie, so clearing it orphans their sets permanently — don't clear cookies to test the signed-out state; fetch with `credentials: "omit"` instead.
 
-**Sign-in depends on three dashboard settings and none are in this repo** (anonymous sign-ins, the Google provider, and **Allow manual linking**, which `linkIdentity()` requires and which is off by default). They are invisible from the code and the MCP server cannot read them, so when sign-in fails read `error_code` in the Supabase auth logs before touching anything — `auth-errors.ts` maps those codes to the copy on `/signin`, and the callback forwards the real code rather than a generic flag precisely so the page can name the cause. README documents the settings themselves.
+**Sign-in depends on three dashboard settings and none are in this repo** (anonymous sign-ins, the Google provider, and **Allow manual linking**, which `linkIdentity()` requires and which is off by default). They are invisible from the code and the MCP server cannot read them, so when sign-in fails read `error_code` in the Supabase auth logs before touching anything — `auth-errors.ts` maps those codes to the copy on `/signin`, and the callback forwards the real code rather than a generic flag precisely so the page can name the cause. `docs/self-hosting.md` documents the settings themselves.
 
 Server Actions (`src/app/sets/actions.ts`) use the RLS-scoped server client deliberately: the `delete own sets` policy *is* the authorization check, so a forged id matches no rows. At the DB level `problem_set_items.set_id` cascades, but `attempts.set_id` is `ON DELETE SET NULL` — practice history outlives the set it was earned in, which is why deleting a set can't fail on a foreign key.
 
@@ -228,7 +228,7 @@ Both the key renderer (`print-key.ts`) and the on-paper answer space (`component
 
 `src/lib/captcha.ts` solves a Cloudflare Turnstile challenge inside `ensureUser()`, only on the path that creates a *new* anonymous user — so once per browser, not per action.
 
-**It is off unless `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set**, and that is load-bearing: with no key nothing is loaded and Cloudflare is never contacted, so the code ships independently of the dashboard change. Enabling CAPTCHA in Supabase *without* the key set breaks every guest session — the default path through the entire app — so **the key always goes first**. README has the rollout procedure.
+**It is off unless `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is set**, and that is load-bearing: with no key nothing is loaded and Cloudflare is never contacted, so the code ships independently of the dashboard change. Enabling CAPTCHA in Supabase *without* the key set breaks every guest session — the default path through the entire app — so **the key always goes first**. `docs/self-hosting.md` has the rollout procedure.
 
 - **`frame-src` is required.** Turnstile renders in an iframe, and with no `frame-src` the directive falls back to `default-src 'self'` and the challenge is blocked. The host is also in `script-src` for browsers that ignore `strict-dynamic`.
 - **The privacy policy names Cloudflare as a processor.** It previously said "that is the complete list" of three. Any new third party the app contacts has to be added there in the same change, or the policy becomes false.
