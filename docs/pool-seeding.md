@@ -58,9 +58,42 @@ It also stops itself if something is actually broken: three cells in a row that 
 
 ### Who checks the work
 
-**`--verify` is the one real choice.** `gemini` (the default) checks each batch with `solveBatch` — the pipeline's own solver, a different model that never sees the workspace, at roughly three requests per twelve problems. `claude` spends no provider quota at all and is weaker: an author and a checker that are the same model share their blind spots, which is the same objection that makes Gemini-writes-Gemini-checks worth distrusting in the first place. The isolation there is a directory holding the statements and nothing else, plus a brief that says so — not a sandbox.
+Two flags, deliberately not one, because they are not the same trade.
+
+**`--verify` decides who re-solves each batch.** `gemini` (the default) uses `solveBatch` — the pipeline's own solver, a different model that never sees the workspace, at roughly three requests per twelve problems. `claude` spends no provider quota at all and is weaker: an author and a solver that are the same model share their blind spots, which is the same objection that makes Gemini-writes-Gemini-checks worth distrusting in the first place. The isolation there is a directory holding the statements and nothing else, plus a brief that says so — not a sandbox.
+
+**`--equivalence` decides who settles a prose answer.** Local comparison can never do better than "uncertain" on text, which is every `proof`, `conceptual` and `error_analysis` problem — three of the four styles `auto` writes by default. `ai` (the default) spends one provider call. `claude` asks a subprocess. `defer` writes the question out for a person, and in an unattended run that means *dropping* every one of those problems.
+
+> [!TIP]
+> `--equivalence claude` is much the softer of the two substitutions. The blind solve has to be a stranger — it exists to disagree. Equivalence takes both answers as its input, so it was never blind to begin with, and what it asks is a language question ("do these two phrasings say the same thing?") rather than a second opinion on the maths.
+
+So a run that never touches the provider is:
+
+```bash
+npm run seed -- auto --verify claude --equivalence claude
+```
+
+...and it keeps all four styles, where `--equivalence defer` would leave you only `word`.
 
 The requests `gemini` verification costs are worth putting next to what they buy: a pool problem is authored once and reused for as long as it lives, against the five requests a build spends every time it has to write one from scratch.
+
+### Which Claude
+
+`--model` sets the model for both subprocesses; `--author-model` and `--check-model` override it for one each. Unset, they inherit whatever the `claude` CLI is configured to use.
+
+Splitting them is worth it because the two jobs aren't the same difficulty. Writing a good problem from nothing is the expensive half and the one worth a large model. Re-solving a stated problem, and comparing two answers, are ordinary work — a smaller model does them faster and cheaper:
+
+```bash
+npm run seed -- auto --author-model opus --check-model haiku --verify claude --equivalence claude
+```
+
+That also buys back a little of what `--verify claude` gives up, since two models that were trained differently fail in somewhat different places. Only a little: same family, related training, nothing like the independence `--verify gemini` gets structurally.
+
+### How a prose answer actually gets settled
+
+Worth knowing because it decides what a failure costs. The batch is judged once with every prose pair left open, all the open pairs go to one subprocess together — not one each, which would cost more wall clock than the authoring did — and then the batch is judged again with the answers folded in. Re-judging is free: the gates make no model call of their own.
+
+Every way that can go wrong ends in *fewer answers*, never wrong ones. A subprocess that dies, writes nothing, writes malformed JSON, or invents a key it was never asked about contributes nothing for those pairs, and a pair left unanswered stays unjudged and drops its problem — exactly what `defer` does. There is no path through it that is worse than not having asked.
 
 ### What the subprocess gets
 

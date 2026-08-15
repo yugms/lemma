@@ -28,6 +28,9 @@ export const FILES = {
   solveManifest: "solve-manifest.json",
   solved: "solved.json",
   adjudicate: "adjudicate.json",
+  equivalenceBrief: "equivalence-brief.md",
+  equivalenceSchema: "equivalence-schema.json",
+  verdicts: "verdicts.json",
 } as const;
 
 /**
@@ -116,6 +119,22 @@ export async function selectAll<T>(
     rows.push(...batch);
     if (batch.length < size) return rows;
   }
+}
+
+/**
+ * The first thing wrong with a file a model wrote, as a field and a reason.
+ *
+ * Typed structurally rather than against `ZodError` so this file stays free of
+ * the schema library it is describing failures from. Only the first issue: zod
+ * reports every branch of a discriminated union separately, so a batch that got
+ * one field wrong produces pages of them and the first is the useful one.
+ */
+type SchemaIssue = { path: PropertyKey[]; message: string };
+
+export function schemaComplaint(error: { issues: SchemaIssue[] }): string {
+  const issue = error.issues[0];
+  if (!issue) return "no issue reported";
+  return `${issue.path.length ? issue.path.join(".") : "(root)"} — ${issue.message}`;
 }
 
 /**

@@ -53,8 +53,12 @@ const USAGE = `Seed the shared problem pool offline.
   npm run seed -- solve
       Write the solving brief: statements only, no answers. Needs no database.
 
-  npm run seed -- ingest [--dry-run] [--equivalence defer|ai]
+  npm run seed -- ingest [--dry-run] [--equivalence defer|ai|claude]
       Judge the solutions and write what passes into the pool as \`active\`.
+      --equivalence           who settles a prose answer local comparison
+                              cannot: defer to you (default), ai (the
+                              provider), or claude (a subprocess)
+      --model <name>          which Claude, under \`--equivalence claude\`
 
   npm run seed -- auto [--forever] [options]
       All three, in a loop, with \`claude -p\` as the author. Re-censuses each
@@ -63,7 +67,13 @@ const USAGE = `Seed the shared problem pool offline.
       --forever               keep going until stopped (otherwise --minutes)
       --minutes N             stop starting cells after this long (default 60)
       --jobs N                cells at once (default 1; 2-3 is usually fine)
-      --verify gemini|claude  who checks the work (default gemini)
+      --verify gemini|claude  who re-solves each batch (default gemini)
+      --equivalence           who settles a prose answer local comparison
+                              cannot: ai (the provider, default), claude (a
+                              subprocess), or defer, which drops it
+      --model <name>          which Claude authors and checks
+      --author-model <name>   which Claude authors, overriding --model
+      --check-model <name>    which Claude checks, overriding --model
       --target N              depth a cell counts as stocked at (default 12);
                               once every cell reaches it, the loop deepens
       --difficulty <list>     levels to fill (default 1,2,3,4,5)
@@ -77,10 +87,20 @@ const USAGE = `Seed the shared problem pool offline.
       than all of them at once — a dozen problems spread over four styles and
       eight formats is one or two of each at the worst request count.
 
-      \`gemini\` checks with the pipeline's own solver: a different model that
-      never sees the workspace, at about three requests per twelve problems.
-      \`claude\` spends no provider quota and is weaker — an author and a
-      checker that are the same model share their blind spots.
+      \`--verify gemini\` checks with the pipeline's own solver: a different
+      model that never sees the workspace, at about three requests per twelve
+      problems. \`--verify claude\` spends no provider quota and is weaker — an
+      author and a solver that are the same model share their blind spots.
+
+      \`--equivalence claude\` is the far softer of the two, because that
+      question takes both answers as input and so was never blind anyway. It is
+      also what makes a no-provider run worth doing: \`defer\` drops every prose
+      answer, which is every proof, conceptual and error-analysis problem —
+      three of the four styles \`auto\` writes by default.
+
+      For a run that never touches the provider:
+
+          npm run seed -- auto --verify claude --equivalence claude
 
   npm run seed -- stop
       Ask a running \`auto\` to finish its current cell and exit. For a run
@@ -100,9 +120,13 @@ function positiveInt(raw: string | undefined, fallback: number, flag: string, ma
   return n;
 }
 
-function parseEquivalence(raw: string | undefined, fallback: "defer" | "ai"): "defer" | "ai" {
+type Equivalence = "defer" | "ai" | "claude";
+
+function parseEquivalence(raw: string | undefined, fallback: Equivalence): Equivalence {
   const value = raw ?? fallback;
-  if (value !== "defer" && value !== "ai") throw new Error(`--equivalence must be "defer" or "ai"`);
+  if (value !== "defer" && value !== "ai" && value !== "claude") {
+    throw new Error(`--equivalence must be "defer", "ai" or "claude"`);
+  }
   return value;
 }
 
@@ -123,6 +147,8 @@ async function main(): Promise<void> {
       jobs: { type: "string" },
       verify: { type: "string" },
       model: { type: "string" },
+      "author-model": { type: "string" },
+      "check-model": { type: "string" },
       forever: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
@@ -169,6 +195,7 @@ async function main(): Promise<void> {
         dir: dir(),
         dryRun: values["dry-run"] ?? false,
         equivalence: parseEquivalence(values.equivalence, "defer"),
+        model: values["check-model"] ?? values.model,
       });
     }
 
@@ -203,7 +230,10 @@ async function main(): Promise<void> {
         // to defer them to — so the default spends the call. `defer` is the
         // opt-out, and it drops those problems rather than guessing at them.
         equivalence: parseEquivalence(values.equivalence, "ai"),
-        model: values.model,
+        // `--model` is the shorthand for both halves and each may override it,
+        // resolved here so nothing downstream has to know a shorthand existed.
+        authorModel: values["author-model"] ?? values.model,
+        checkModel: values["check-model"] ?? values.model,
         dryRun: values["dry-run"] ?? false,
       });
     }
