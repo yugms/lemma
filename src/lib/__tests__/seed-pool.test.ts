@@ -1,16 +1,19 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SolverResult } from "@/lib/ai/schemas";
+import { verdictsFor, writeEquivalenceBrief } from "@/tools/seed-pool/adjudicate";
 import { normalizeAuthored } from "@/tools/seed-pool/authored";
-import { attemptCap, cellDir, childEnv, pickCells, rotate } from "@/tools/seed-pool/auto";
+import { cellDir, pickCells, rotate } from "@/tools/seed-pool/auto";
+import { attemptCap, childEnv } from "@/tools/seed-pool/claude-cli";
 import { loadCatalog, type PoolRow, type TopicRow } from "@/tools/seed-pool/plan";
 import { assertSolvedMatchesBrief, writeSolvingBrief } from "@/tools/seed-pool/solve";
 import {
   deferringEquivalence,
   equivalenceKey,
   judgeAll,
+  judgeWithClaudeAdjudicator,
   mergeAdjudications,
   pairSolved,
   type Pending,
@@ -19,6 +22,7 @@ import {
   DEFAULT_DIR,
   parseDifficulties,
   parseEnumList,
+  schemaComplaint,
   seedCommand,
   selectAll,
   splitList,
@@ -285,6 +289,157 @@ describe("judgeAll", () => {
       deferringEquivalence(known)
     );
     expect(judgement).toMatchObject({ status: "accepted" });
+  });
+});
+
+/**
+ * The `--equivalence claude` half: a prose answer settled by a subprocess
+ * rather than by the provider or by a person.
+ *
+ * What is tested here is the keying and the failure floor, not the judgement
+ * itself. A verdict is a sentence from a model and there is nothing to assert
+ * about it; what matters is that a ruling can only ever land on the pair it was
+ * asked about, and that every way of getting no answer leaves the problem
+ * dropped rather than accepted.
+ */
+describe("verdictsFor", () => {
+  const questions = [
+    { key: "aaaa", reference: "even", acceptable_forms: [], answer_given: "always even" },
+    { key: "bbbb", reference: "odd", acceptable_forms: [], answer_given: "always odd" },
+  ];
+
+  it("keeps a ruling on a pair that was asked about", () => {
+    const verdicts = verdictsFor(questions, [{ key: "aaaa", equivalent: true }]);
+    expect(verdicts.get("aaaa")).toBe(true);
+  });
+
+  /**
+   * The failure `pairSolved` exists to prevent, arriving through the other
+   * door: a verdict attached to a pair nobody asked about would accept one
+   * problem's answer key on the strength of a ruling about another's.
+   */
+  it("drops a ruling on a pair that was never asked about", () => {
+    const verdicts = verdictsFor(questions, [{ key: "cccc", equivalent: true }]);
+    expect(verdicts.size).toBe(0);
+  });
+
+  it("keeps the first ruling on a repeated key and ignores the rest", () => {
+    const verdicts = verdictsFor(questions, [
+      { key: "aaaa", equivalent: false },
+      { key: "aaaa", equivalent: true },
+    ]);
+    expect(verdicts.get("aaaa")).toBe(false);
+  });
+
+  // An unanswered pair has to stay unanswered rather than default either way:
+  // `true` would wave a wrong key through, and `false` is the bug that once
+  // rejected every prose-answered problem.
+  it("leaves a pair it was given no ruling on out of the map entirely", () => {
+    const verdicts = verdictsFor(questions, [{ key: "aaaa", equivalent: true }]);
+    expect(verdicts.has("bbbb")).toBe(false);
+  });
+});
+
+describe("writeEquivalenceBrief", () => {
+  const dir = () => mkdtempSync(join(tmpdir(), "seed-adjudicate-"));
+
+  it("shows both answers and the key each verdict has to carry", () => {
+    const brief = writeEquivalenceBrief(
+      [
+        {
+          key: "deadbeef",
+          reference: "even",
+          acceptable_forms: ["divisible by two"],
+          answer_given: "the sum is always even",
+        },
+      ],
+      dir()
+    );
+    expect(brief).toContain("deadbeef");
+    expect(brief).toContain("even");
+    expect(brief).toContain("the sum is always even");
+    expect(brief).toContain("divisible by two");
+  });
+
+  /**
+   * The adjudicator is the one subprocess that is *supposed* to see both
+   * answers, so the brief must not inherit the solving brief's instruction not
+   * to look at them — but it still has to say the job is comparison and not
+   * re-marking, or a checker that decides the author was wrong rejects a
+   * correct problem on its own authority.
+   */
+  it("asks for a comparison rather than a re-solve", () => {
+    const brief = writeEquivalenceBrief(
+      [{ key: "aaaa", reference: "even", acceptable_forms: [], answer_given: "even" }],
+      dir()
+    );
+    expect(brief).toMatch(/conclusion only/i);
+    expect(brief).toMatch(/not marking the problem/i);
+  });
+});
+
+describe("judgeWithClaudeAdjudicator", () => {
+  /**
+   * The short circuit that keeps the flag from costing anything on the cells
+   * that don't need it. Most batches raise no question at all — every drill and
+   * word problem has an answer local comparison settles — and spawning a
+   * subprocess to be told there is nothing to ask would add minutes per cell
+   * across a run that is already dominated by authoring.
+   *
+   * It is also what makes this test possible without a `claude` on PATH: no
+   * pending question, no spawn.
+   */
+  it("does not spawn anything when local comparison settled everything", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "seed-adjudicate-")), "never-made");
+    const run = await judgeWithClaudeAdjudicator(
+      normalizeAuthored({ problems: [mcq()] }, plan).problems,
+      [solved()],
+      2,
+      { dir, timeoutMs: 1 }
+    );
+    expect(run.asked).toBe(0);
+    expect(run.judged[0]).toMatchObject({ status: "accepted" });
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  // A verdict already on file is the one case where a prose answer needs no
+  // subprocess either — `ingest` carries them forward in `adjudicate.json`, and
+  // re-asking would spend a call to be told what is already written down.
+  it("uses a verdict it was given instead of asking again", async () => {
+    const given = "the sum is always even";
+    const dir = join(mkdtempSync(join(tmpdir(), "seed-adjudicate-")), "never-made");
+    const run = await judgeWithClaudeAdjudicator(
+      normalizeAuthored({ problems: [prose()] }, plan).problems,
+      [solved({ final_answer_latex: given, final_answer_numeric: null })],
+      2,
+      { dir, timeoutMs: 1, known: new Map([[equivalenceKey(given, "even", []), true]]) }
+    );
+    expect(run.asked).toBe(0);
+    expect(run.judged[0]).toMatchObject({ status: "accepted" });
+    expect(existsSync(dir)).toBe(false);
+  });
+});
+
+/**
+ * Only a log line, but the log is the whole of what a run leaves behind: a cell
+ * clears its own workspace on the next attempt, so a failure that says just
+ * "does not match the schema" is a failure nobody can act on afterwards.
+ */
+describe("schemaComplaint", () => {
+  it("names the field and the reason", () => {
+    expect(
+      schemaComplaint({ issues: [{ path: ["results", 0, "problem_number"], message: "expected number" }] })
+    ).toBe("results.0.problem_number — expected number");
+  });
+
+  it("says where a whole-object failure happened rather than nothing", () => {
+    expect(schemaComplaint({ issues: [{ path: [], message: "expected object" }] })).toBe(
+      "(root) — expected object"
+    );
+  });
+
+  it("survives an error carrying no issues", () => {
+    expect(schemaComplaint({ issues: [] })).toBe("no issue reported");
   });
 });
 

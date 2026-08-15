@@ -72,7 +72,7 @@ npx vitest run -t "normalizeMath"               # one test by name
 - **`client-bundle.test.ts`** — that no client component can statically reach zod, KaTeX, the model SDK or the Supabase browser SDK. Four prose rules that nothing enforced until one of them broke and put 283 kB of zod on the landing page.
 - **`materials.test.ts`** — what an uploaded document is allowed to become. The digest is the only route from a file to an authoring prompt, and every bound on it is applied in code rather than by the schema, so this is the thing that enforces them.
 - **`material-pool.test.ts`** — that problems written from one student's upload cannot collide with the shared pool. `status` alone looks sufficient and isn't; the upsert would overwrite it in either direction.
-- **`seed-pool.test.ts`** — the offline half of `npm run seed`: the gates, the cell ranking, and what the authoring subprocess is allowed to inherit.
+- **`seed-pool.test.ts`** — the offline half of `npm run seed`: the gates, the cell ranking, what the authoring subprocess is allowed to inherit, and that a verdict from a subprocess can only ever land on the answer pair it was asked about.
 - **`analytics.test.ts`** — streaks, smoothing and weakness ranking, run against a pure `aggregate()`.
 - **`plot.test.ts`** — plot geometry and SVG output, which is a pure string.
 - **`scan.test.ts`** — the "not attempted" rule that keeps a blank from being recorded as a miss.

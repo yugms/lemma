@@ -555,6 +555,28 @@ export const EquivalenceResultSchema = z.object({
   canonical_form: z.string().describe("The answer in simplest canonical form, LaTeX"),
 });
 
+/**
+ * Several of the same verdict at once, keyed rather than ordered.
+ *
+ * Offline seeding asks the question in bulk — every prose answer in a batch is
+ * unresolvable by local comparison, so a cell of twelve can raise a dozen of
+ * them — and one call answering all of them beats a subprocess each. The `key`
+ * is the caller's, echoed back, on the same reasoning as `problem_number` in
+ * `SolvedBatchSchema`: pairing verdicts by array position would silently attach
+ * one answer pair's ruling to another the moment a verdict went missing, and an
+ * "equivalent" borrowed from a neighbour is how a wrong answer key passes. An
+ * unrecognised or absent key resolves nothing and leaves that problem unjudged,
+ * which drops it.
+ */
+export const EquivalenceBatchSchema = z.object({
+  verdicts: z.array(
+    z.object({
+      key: z.string().describe("The key of the answer pair this verdict is for, copied exactly"),
+      equivalent: z.boolean(),
+    })
+  ),
+});
+
 /** Wrong-answer feedback output. */
 export const FeedbackResultSchema = z.object({
   likely_misconception: z

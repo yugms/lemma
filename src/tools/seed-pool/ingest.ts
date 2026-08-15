@@ -14,17 +14,22 @@
  * so a disagreement is reported with both answers and the problem is dropped.
  */
 import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askModelIfEquivalent, type EquivalenceCheck } from "@/lib/ai/equivalence";
 import { SolvedBatchSchema, type SolverResult, type TaggedProblem } from "@/lib/ai/schemas";
 import { solverGates } from "@/lib/ai/verify";
 import { insertProblems, rowFromGenerated } from "@/lib/sets";
+import { adjudicateWithClaude } from "@/tools/seed-pool/adjudicate";
 import { loadAuthored, reportDropped } from "@/tools/seed-pool/authored";
+import { attemptCap } from "@/tools/seed-pool/claude-cli";
 import { assertSolvedMatchesBrief } from "@/tools/seed-pool/solve";
 import {
   FILES,
   readJson,
   readJsonIfPresent,
+  schemaComplaint,
   writeJson,
   type SeedPlan,
 } from "@/tools/seed-pool/shared";
@@ -180,11 +185,75 @@ export async function judgeAll(
   return out;
 }
 
+/**
+ * Where an adjudicating subprocess works: the questions and nothing else.
+ *
+ * Named for the files it holds rather than for the step, since `adjudicate.json`
+ * — the hand-answered version of the same questions — sits in the parent
+ * directory and two things called `adjudicate` a level apart is a good way to
+ * open the wrong one.
+ */
+export const equivalenceDir = (dir: string) => join(dir, "equivalence");
+
+/**
+ * Judge a batch twice, with `claude -p` answering in between whatever local
+ * comparison could not settle.
+ *
+ * Two passes rather than a check that spawns per question, because a cell of
+ * twelve prose problems raises a dozen questions and a subprocess each would
+ * cost more wall clock than the authoring did. The shape is the one the manual
+ * flow already has — collect, answer, judge again — with `adjudicate.json`'s
+ * round trip through a person replaced by one round trip through a subprocess.
+ *
+ * Re-judging is free: `solverGates` makes no model call of its own, so the
+ * second pass is the same local arithmetic over a map that now has answers in
+ * it. Every question left unanswered stays deferred, which drops its problem —
+ * the same outcome `--equivalence defer` gives, and the floor this degrades to
+ * when the subprocess fails.
+ */
+export async function judgeWithClaudeAdjudicator(
+  problems: TaggedProblem[],
+  solved: (SolverResult | null)[],
+  difficulty: number,
+  opts: { dir: string; model?: string; timeoutMs: number; known?: Map<string, boolean> },
+  log: (line: string) => void = () => {}
+): Promise<{ judged: Judgement[]; pending: Pending[]; asked: number }> {
+  const known = new Map(opts.known ?? []);
+  const first = deferringEquivalence(known);
+  const judged = await judgeAll(problems, solved, difficulty, first);
+  if (first.pending.length === 0) return { judged, pending: [], asked: 0 };
+
+  mkdirSync(opts.dir, { recursive: true });
+  const verdicts = await adjudicateWithClaude(
+    first.pending,
+    opts.dir,
+    { model: opts.model, timeoutMs: opts.timeoutMs },
+    log
+  );
+  if (verdicts.size === 0) {
+    return { judged, pending: first.pending, asked: first.pending.length };
+  }
+
+  for (const [key, verdict] of verdicts) known.set(key, verdict);
+  const second = deferringEquivalence(known);
+  return {
+    judged: await judgeAll(problems, solved, difficulty, second),
+    pending: second.pending,
+    asked: first.pending.length,
+  };
+}
+
 export type IngestOptions = {
   dir: string;
   dryRun: boolean;
-  /** `defer` writes the open questions out; `ai` spends a provider call on each. */
-  equivalence: "defer" | "ai";
+  /**
+   * `defer` writes the open questions out for a person; `ai` spends a provider
+   * call on each; `claude` asks a subprocess, which is the same question put to
+   * a model that is not the provider's.
+   */
+  equivalence: "defer" | "ai" | "claude";
+  /** Which Claude answers them under `--equivalence claude`. */
+  model?: string;
 };
 
 export async function runIngest(db: SupabaseClient, opts: IngestOptions): Promise<void> {
@@ -201,9 +270,8 @@ export async function runIngest(db: SupabaseClient, opts: IngestOptions): Promis
   );
   const parsed = SolvedBatchSchema.safeParse(rawSolved);
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
     throw new Error(
-      `${dir}/${FILES.solved} does not match the solver schema: ${issue?.path.join(".")} — ${issue?.message}`
+      `${dir}/${FILES.solved} does not match the solver schema: ${schemaComplaint(parsed.error)}`
     );
   }
   // Before anything is paired by number, prove the numbers still mean what they
@@ -217,15 +285,41 @@ export async function runIngest(db: SupabaseClient, opts: IngestOptions): Promis
       .filter((p) => typeof p.equivalent === "boolean")
       .map((p) => [p.key, p.equivalent as boolean])
   );
-  const equivalence =
-    opts.equivalence === "ai"
-      ? { check: askModelIfEquivalent, pending: [] as Pending[] }
-      : deferringEquivalence(answered);
   if (answered.size > 0) {
     console.log(`Using ${answered.size} equivalence verdict(s) from ${FILES.adjudicate}.`);
   }
 
-  const judged = await judgeAll(problems, solved, plan.difficulty, equivalence);
+  let judged: Judgement[];
+  let pending: Pending[];
+  if (opts.equivalence === "claude") {
+    // No run deadline here the way `auto` has one — a person is watching this
+    // one — so the subprocess gets the flat ceiling `attemptCap` tops out at.
+    const run = await judgeWithClaudeAdjudicator(
+      problems,
+      solved,
+      plan.difficulty,
+      {
+        dir: equivalenceDir(dir),
+        model: opts.model,
+        timeoutMs: attemptCap(Infinity),
+        known: answered,
+      },
+      (line) => console.log(line.trim())
+    );
+    if (run.asked > 0) {
+      console.log(`Asked \`claude\` about ${run.asked} answer pair(s) local comparison could not settle.`);
+    }
+    judged = run.judged;
+    pending = run.pending;
+  } else {
+    const equivalence =
+      opts.equivalence === "ai"
+        ? { check: askModelIfEquivalent, pending: [] as Pending[] }
+        : deferringEquivalence(answered);
+    judged = await judgeAll(problems, solved, plan.difficulty, equivalence);
+    pending = equivalence.pending;
+  }
+
   const accepted = judged.filter((j) => j.status === "accepted");
   const deferred = judged.filter((j) => j.status === "deferred");
   const unsolved = judged.filter((j) => j.status === "unsolved");
@@ -250,9 +344,9 @@ export async function runIngest(db: SupabaseClient, opts: IngestOptions): Promis
   );
 
   if (deferred.length > 0) {
-    const path = writeJson(dir, FILES.adjudicate, mergeAdjudications(previous, equivalence.pending));
+    const path = writeJson(dir, FILES.adjudicate, mergeAdjudications(previous, pending));
     console.log(
-      `\n${equivalence.pending.length} answer pair(s) need a judgement — these are the prose answers
+      `\n${pending.length} answer pair(s) need a judgement — these are the prose answers
 local comparison cannot settle. Open ${path}, set each "equivalent" to true or
 false, and run ingest again. Judge the conclusion only: "even" and "n+m=2k, so
 the sum is even" are the same answer.`
