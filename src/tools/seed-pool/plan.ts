@@ -91,11 +91,18 @@ const tally = <T>(rows: T[], key: (r: T) => string): Map<string, number> => {
  * three problems in it serves the same three to everyone.
  */
 export async function loadCatalog(db: SupabaseClient, course?: string): Promise<TopicRow[]> {
-  const { data, error } = await db.from("topics").select(TOPIC_COLUMNS);
-  if (error) throw new Error(`topic lookup failed: ${error.message}`);
-  return (data as unknown as TopicRow[]).filter(
-    (t) => !course || t.units?.courses?.title === course
-  );
+  // Paged for the same reason `loadPool` is: PostgREST caps a response at 1000
+  // rows and says nothing about having done so. A truncated catalog doesn't
+  // fail, it just quietly stops offering the topics past the cut — `census`
+  // omits them and `auto` never picks a cell in them, which reads as those
+  // topics simply being well stocked. The course filter stays in memory
+  // because the title lives two joins away.
+  const rows = await selectAll<TopicRow>(async (from, to) => {
+    const { data, error } = await db.from("topics").select(TOPIC_COLUMNS).range(from, to);
+    // The same cast `loadTopics` makes: PostgREST types a nested join as an array.
+    return { data: data as unknown as TopicRow[] | null, error };
+  });
+  return rows.filter((t) => !course || t.units?.courses?.title === course);
 }
 
 export async function runCensus(

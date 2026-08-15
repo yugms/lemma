@@ -11,6 +11,7 @@
  * It needs no database and no key, so it can be run in a context that has never
  * seen the answers. That is the point of it being a separate step.
  */
+import { createHash } from "node:crypto";
 import { SOLVER_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { jsonSchemaFor } from "@/lib/ai/provider";
 import { SolvedBatchSchema, type TaggedProblem } from "@/lib/ai/schemas";
@@ -20,10 +21,59 @@ import {
   fence,
   FILES,
   readJson,
+  readJsonIfPresent,
   writeFile,
   writeJson,
   type SeedPlan,
 } from "@/tools/seed-pool/shared";
+
+/**
+ * A fingerprint of exactly what the solver was shown, in the order it saw it.
+ *
+ * Hashed from `solverPrompt` rather than from the statement, because the prompt
+ * is the whole of what was solved — a problem whose choices were reordered is a
+ * different question with the same statement.
+ */
+export const promptHashes = (problems: TaggedProblem[]): string[] =>
+  problems.map((p) => createHash("sha256").update(solverPrompt(p)).digest("hex").slice(0, 16));
+
+/**
+ * Refuse to pair solutions onto a batch that is no longer the one they answer.
+ *
+ * `problem_number` is an offset into the survivors of `authored.json`, and
+ * `ingest` re-derives those survivors from the file rather than from whatever
+ * `solve` saw. Between the two steps the file is *expected* to be edited —
+ * `reportDropped` says so in as many words — so deleting a problem from the
+ * middle and re-running `ingest` without re-running `solve` renumbers
+ * everything after it. Nothing downstream can notice: the numbers are all in
+ * range, every result claims one, and each problem is judged against the next
+ * one's solution. That is the failure `problem_number` exists to prevent,
+ * arriving through the one door it doesn't cover.
+ *
+ * A missing manifest is treated as a mismatch. It means `solve` has not been
+ * run since this check shipped, so there is no evidence either way — and the
+ * cost of being wrong is a wrong answer key stamped `verified`, against a
+ * re-run that costs one command.
+ */
+export function assertSolvedMatchesBrief(dir: string, problems: TaggedProblem[]): void {
+  const manifest = readJsonIfPresent<{ prompts?: unknown }>(dir, FILES.solveManifest);
+  const before = Array.isArray(manifest?.prompts) ? (manifest.prompts as string[]) : null;
+  const now = promptHashes(problems);
+
+  if (before === null) {
+    throw new Error(
+      `${dir}/${FILES.solveManifest} is missing, so there is no way to tell whether ` +
+        `${FILES.solved} answers these problems — run \`npm run seed -- solve\` and solve the brief it writes`
+    );
+  }
+  if (before.length !== now.length || before.some((h, i) => h !== now[i])) {
+    throw new Error(
+      `${FILES.authored} has changed since \`solve\` was run — the solutions in ${FILES.solved} ` +
+        `were written against a different batch, and pairing them by number now would judge each ` +
+        `problem against its neighbour's answer. Re-run \`npm run seed -- solve\` and solve the new brief.`
+    );
+  }
+}
 
 /**
  * Write the statements-only brief and the schema its answers must match.
@@ -41,6 +91,10 @@ export function writeSolvingBrief(
 ): { path: string; brief: string } {
   const at = (name: string) => (next === null ? name : `${dir}/${name}`);
   writeJson(dir, FILES.solverSchema, jsonSchemaFor(SolvedBatchSchema));
+  // What `ingest` checks its own reading of `authored.json` against before it
+  // pairs anything by number. Written here because here is where the numbering
+  // is decided.
+  writeJson(dir, FILES.solveManifest, { prompts: promptHashes(problems) });
 
   const body = problems
     .map((p, i) => `### [${i + 1}]\n\n${solverPrompt(p)}`)

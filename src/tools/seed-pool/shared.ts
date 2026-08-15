@@ -25,6 +25,7 @@ export const FILES = {
   authored: "authored.json",
   solvingBrief: "solving-brief.md",
   solverSchema: "solver-schema.json",
+  solveManifest: "solve-manifest.json",
   solved: "solved.json",
   adjudicate: "adjudicate.json",
 } as const;

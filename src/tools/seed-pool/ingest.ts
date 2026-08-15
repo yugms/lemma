@@ -20,6 +20,7 @@ import { SolvedBatchSchema, type SolverResult, type TaggedProblem } from "@/lib/
 import { solverGates } from "@/lib/ai/verify";
 import { insertProblems, rowFromGenerated } from "@/lib/sets";
 import { loadAuthored, reportDropped } from "@/tools/seed-pool/authored";
+import { assertSolvedMatchesBrief } from "@/tools/seed-pool/solve";
 import {
   FILES,
   readJson,
@@ -205,6 +206,9 @@ export async function runIngest(db: SupabaseClient, opts: IngestOptions): Promis
       `${dir}/${FILES.solved} does not match the solver schema: ${issue?.path.join(".")} — ${issue?.message}`
     );
   }
+  // Before anything is paired by number, prove the numbers still mean what they
+  // meant when the brief was written.
+  assertSolvedMatchesBrief(dir, problems);
   const solved = pairSolved(parsed.data.results, problems.length);
 
   const previous = readJsonIfPresent<Pending[]>(dir, FILES.adjudicate) ?? [];

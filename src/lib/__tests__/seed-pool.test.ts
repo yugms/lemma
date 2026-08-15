@@ -1,9 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SolverResult } from "@/lib/ai/schemas";
 import { normalizeAuthored } from "@/tools/seed-pool/authored";
 import { attemptCap, cellDir, childEnv, pickCells, rotate } from "@/tools/seed-pool/auto";
-import type { PoolRow, TopicRow } from "@/tools/seed-pool/plan";
+import { loadCatalog, type PoolRow, type TopicRow } from "@/tools/seed-pool/plan";
+import { assertSolvedMatchesBrief, writeSolvingBrief } from "@/tools/seed-pool/solve";
 import {
   deferringEquivalence,
   equivalenceKey,
@@ -445,6 +448,102 @@ describe("childEnv", () => {
     });
     expect(out.ANTHROPIC_API_KEY).toBe("ak");
     expect(out.CLAUDE_CODE_OAUTH_TOKEN).toBe("ot");
+  });
+});
+
+describe("loadCatalog", () => {
+  const topic = (slug: string) => ({ id: slug, slug, title: slug, description: null, units: null });
+
+  /** A db that hands back the given pages, one per `.range()` call. */
+  const paged = (pages: unknown[][]) => {
+    const ranges: [number, number][] = [];
+    const db = {
+      from: () => ({
+        select: () => ({
+          range: (from: number, to: number) => {
+            ranges.push([from, to]);
+            return Promise.resolve({ data: pages.shift() ?? [], error: null });
+          },
+        }),
+      }),
+    };
+    return { ranges, db: db as unknown as Parameters<typeof loadCatalog>[0] };
+  };
+
+  /**
+   * PostgREST caps a response at 1000 rows silently. A catalog that stopped
+   * there wouldn't fail — `census` would omit the topics past the cut and
+   * `auto` would never pick a cell in them, which reads as those topics being
+   * well stocked rather than invisible.
+   */
+  it("keeps reading past a full first page", async () => {
+    const first = Array.from({ length: 1000 }, (_, i) => topic(`t${i}`));
+    const { ranges, db } = paged([first, [topic("last-a"), topic("last-b")]]);
+    const all = await loadCatalog(db);
+    expect(all).toHaveLength(1002);
+    expect(all.at(-1)?.slug).toBe("last-b");
+    expect(ranges).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ]);
+  });
+
+  it("stops after one page when that page comes back short", async () => {
+    const { ranges, db } = paged([[topic("a"), topic("b")]]);
+    await expect(loadCatalog(db)).resolves.toHaveLength(2);
+    expect(ranges).toEqual([[0, 999]]);
+  });
+
+  it("still narrows to one course", async () => {
+    const inCourse = { ...topic("a"), units: { title: "u", courses: { title: "Algebra 1" } } };
+    const { db } = paged([[inCourse, topic("b")]]);
+    await expect(loadCatalog(db, "Algebra 1")).resolves.toEqual([inCourse]);
+  });
+});
+
+describe("assertSolvedMatchesBrief", () => {
+  const dir = () => mkdtempSync(join(tmpdir(), "seed-manifest-"));
+  const batch = (n: number) =>
+    normalizeAuthored(
+      { problems: Array.from({ length: n }, (_, i) => mcq({ statement_latex: `Problem ${i}` })) },
+      plan
+    ).problems;
+
+  it("passes when the batch is the one the brief was written from", () => {
+    const d = dir();
+    const problems = batch(3);
+    writeSolvingBrief(problems, d, null);
+    expect(() => assertSolvedMatchesBrief(d, problems)).not.toThrow();
+  });
+
+  /**
+   * `problem_number` is an offset into the survivors of `authored.json`, and
+   * `ingest` re-derives them from the file. Deleting one from the middle — which
+   * `reportDropped` tells you to do — renumbers everything after it, and every
+   * result still lands in range. Each problem would be judged against the next
+   * one's solution, silently.
+   */
+  it("refuses a batch a problem was removed from the middle of", () => {
+    const d = dir();
+    const problems = batch(3);
+    writeSolvingBrief(problems, d, null);
+    const shortened = [problems[0], problems[2]];
+    expect(() => assertSolvedMatchesBrief(d, shortened)).toThrow(/has changed since/);
+  });
+
+  it("refuses a batch whose problems were reordered", () => {
+    const d = dir();
+    const problems = batch(3);
+    writeSolvingBrief(problems, d, null);
+    expect(() =>
+      assertSolvedMatchesBrief(d, [problems[1], problems[0], problems[2]])
+    ).toThrow(/has changed since/);
+  });
+
+  // No manifest is no evidence either way, and the cost of guessing wrong is a
+  // wrong answer key stamped `verified`.
+  it("refuses a workspace with no manifest at all", () => {
+    expect(() => assertSolvedMatchesBrief(dir(), batch(2))).toThrow(/is missing/);
   });
 });
 
