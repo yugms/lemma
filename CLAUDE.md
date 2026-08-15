@@ -6,6 +6,18 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 **README.md is the setup and product document** — install, environment variables, Supabase dashboard configuration, the CAPTCHA rollout procedure, the route map, the limits table. It is the better copy of all of that; this file does not repeat it. What follows is the reasoning a change has to survive.
 
+## Reporting your work
+
+**The person you are reporting to does not read the codebase.** Every change to it is made through Claude Code, so a diff, a file path or a symbol name is not something they can go and check — it is something they have to take on trust. These documents can be as dense as they need to be. **What you write in chat cannot.**
+
+- **Lead with what changed and what it means**, in ordinary words. "The seeding tool was handing its helper the database password" lands; "`childEnv` only stripped `SESSION_VARS`" does not.
+- **Assume no shorthand is shared.** RLS, upsert, SSE, `bespoke()`, the pool — each is either explained in the same breath or left out.
+- **Name a file only when it is the answer to a likely next question**, and then one or two, not a tour of the diff.
+- **Say what could break and how likely it is**, because nobody downstream is reading the code to find out. "Tested, works" and "should work, untested" must never look the same.
+- **Plain version first, detail after, clearly separated**, so it can be stopped as soon as it's understood. Detail is welcome underneath; it is not welcome as the way in.
+
+None of this means being vague. Say the true thing simply — an explanation that leaves out the risk to sound tidy is worse than jargon.
+
 ## Traps
 
 Every one of these fails *silently* — the app keeps working and something is quietly wrong. Each names the file that explains it.
@@ -28,6 +40,8 @@ Every one of these fails *silently* — the app keeps working and something is q
 | A nonce on `style-src` *disables* `'unsafe-inline'` rather than adding to it | `proxy.ts` |
 | Enabling CAPTCHA in the Supabase dashboard before setting the site key breaks every guest session | `captcha.ts` |
 | Storage has no cascade from `auth.users`, so files must be swept *before* the row delete | `account.ts` |
+| A seeded problem solved in the context that authored it is stamped `verified` having been verified by nobody | `tools/seed-pool/solve.ts` |
+| A rate-limited `claude -p` waits instead of refusing, so a seeding run without a per-attempt cap spends hours looking busy | `tools/seed-pool/auto.ts` |
 
 ## Commands
 
@@ -37,6 +51,7 @@ npm run build          # next build
 npm start              # next start — serve the production build
 npm run lint           # eslint
 npm run test           # vitest run (offline tests only)
+npm run seed           # pool-seeding CLI; `npm run seed -- --help`
 npx tsc --noEmit       # typecheck — there is no npm script for this
 
 npx vitest run src/lib/__tests__/core.test.ts   # one test file
@@ -237,6 +252,50 @@ Deletes use the service client with a `userId` resolved server-side, never one p
 ### Templates
 
 `src/lib/templates/` holds deterministic parametrized generators: seeded RNG in, a full `GeneratedProblem` out, so they are free and skip AI verification entirely (`verification: { method: "computed" }`). To add one, implement `Template` and register it in the `templates` array in `index.ts`. `topicSlugs` must match `topics.slug` values in the DB catalog — a typo silently disables the template. Templates only serve the `drill` style. `core.test.ts` structurally validates every template across seeds, difficulties, and formats.
+
+### Seeding the pool offline
+
+`src/tools/seed-pool/` (`npm run seed`) is the other way to fill step 1. Templates are free because they're computed; pool problems are free because somebody already paid for them, and until now the only somebody was a build. This lets the pool be stocked deliberately, with the authoring and the checking done by whoever runs the tool.
+
+**Nothing in it reimplements the pipeline, and that is the whole design.** The briefs come from `GENERATOR_SYSTEM_PROMPT` + `buildUserMessage` + `solverPrompt`, `ingest` calls `structuralCheck` and `solverGates`, and the write goes through `insertProblems`. Four things were exported to make that possible rather than copied — that is the trade, and it is the right one: a second authoring specification would drift, a second set of gates would be the easier one to pass, and a second writer would reimplement the `ON CONFLICT` collapse it exists to avoid.
+
+**The three steps are separate processes because the check has to be blind.** `.seed/authored.json` holds the key, the worked solution and the distractor rationales; `solve` writes out the statements alone and needs no database and no key, precisely so it can be run somewhere that has never seen them. Run it in the session that authored the batch and it will agree with itself, the gates will pass, and `verification.status = "verified"` will be written on a problem nothing verified. That is the sharpest trap here and the tool cannot detect it.
+
+Three smaller decisions:
+
+- **`method: "offline-independent-solve"`**, not the pipeline's `"independent-solve"`. Same check, different hands, and the column is the only record of which — anything ever found wrong with a batch seeded this way is findable by that string and by nothing else.
+- **No repair pass.** `verifyOrRepair` spends a call rewriting a disagreed-with problem because a live build has a student waiting and a slot to fill. Nothing is waiting here, so a disagreement prints both answers and discards.
+- **A prose answer is deferred, never resolved to `false`.** `solverAgrees` ends at "do these two mean the same thing?" for every `text` answer, which is every `proof`, `conceptual` and `error_analysis` problem. Live that goes to a model; here it is written to `.seed/adjudicate.json` and the next `ingest` picks it up. Answering it `false` in the meantime is the exact bug that once rejected 100% of prose-answered problems while drill looked fine, so `judgeAll` reports those as `deferred` rather than `rejected` — the distinction is what `deferringEquivalence` exists for.
+
+It writes `status: "active"`, so it stocks ordinary builds only: `bespoke()` sets skip pool reuse by design. And it can only usefully write non-`drill` problems, since templates already serve `drill` for free.
+
+**`auto` (`auto.ts`) is those three steps in a loop with `claude -p` as the author**, run in rounds until something stops it. It adds the loop, the ranking and the subprocess, and nothing else — `writeAuthoringBrief`, `normalizeAuthored`, `writeSolvingBrief`, `judgeAll` and `insertProblems` are the same functions the manual commands call. Seven decisions in it are non-obvious:
+
+- **`--verify gemini` is the default, and it is not the cheap option.** `solveBatch` is a different model that never sees the workspace, so the independence is structural rather than requested; `--verify claude` spends no quota and is weaker for the same reason Gemini-checks-Gemini is. What makes the requests worth spending is that a pool problem is authored once and reused for as long as it lives, against five requests every time a build writes one.
+- **Depth is counted over the requested styles and formats, not per cell.** The pool query matches those with `IN` and only difficulty with `=`, so forty drill/mcq rows are worth nothing to a student asking for a word problem in open form — and ranking on the raw total sends the whole run back to the deepest cells.
+- **A round re-censuses, because the last round changed the answer.** Picking the cell list once would keep working whatever was thinnest an hour ago.
+- **Running out of cells raises the target rather than ending the run** — past "covered once", *keep going* can only mean deeper, and raising the target deepens the catalog evenly instead of burrowing into whichever topic sorted first.
+- **What a batch asks for is a rotating slice of the vocabulary, not all of it** (`rotate`). A dozen problems spread over four styles and eight formats is one or two of each, and `splitAcrossKinds` divides before the mix is packed into calls — so asking for everything at once buys a thin sample at the worst request count. Depth is still measured over the whole requested vocabulary, which is what brings the cell back until it is stocked across all of it.
+- **The per-invocation timeout is derived from what is left of the run** (`attemptCap`), for the same reason the provider's is. A rate-limited subscription does not refuse; `claude -p` waits, indistinguishable from a long batch. One observed invocation ran 2.5 hours inside a 20-minute run — and resolving on the kill's `close` rather than on the timer is what let it, since `close` waits for every inherited stdio pipe.
+- **A cell's outcome is decided by the file, not the exit code.** An author that wrote `authored.json` and then wedged has done the expensive part.
+
+Two smaller ones. The parent session's `CLAUDE*` variables are cleared before the spawn (`childEnv`) — a nested `claude -p` that inherits them hangs rather than failing, which reads as a slow model. And a *successful* cell's workspace is swept, so a run over the whole catalog doesn't leave several hundred directories of answer keys behind it; what survives under `.seed/auto/` is the failures, which are the only ones worth opening.
+
+**Stopping is a file as well as a signal.** A run started in another window has no Ctrl-C to receive, and killing it outright abandons the cell in flight along with the authoring already paid for. `npm run seed -- stop` writes `.seed/auto/stop`, which the loop checks before each cell; `auto` clears it at startup, since a stop left from last time is not this run's instruction.
+
+**It also stops itself, and the two ways of producing nothing are counted apart.** A cell that authored a dozen problems and had all twelve rejected is the gates working on a hard patch of the catalog, and the next topic may be fine — ten in a row before it gives up. A cell that authored *nothing at all* is the tool being stuck (no `claude` on PATH, a subscription that has stopped answering), and each further attempt costs a full timeout to learn the same thing — three. Collapsing them into one counter makes one of the two numbers wrong.
+
+#### What keeps this safe, in plain words
+
+Unusually for this repo, the seeder writes into a table every student reads *and* runs an agent on the machine it's typed on. Five things carry that, and each is a line somebody could delete without anything appearing to break.
+
+1. **It opens no door.** No route, no RLS policy, no client code — the app-side change was four functions gaining `export`. It runs when you type `npm run seed` and never otherwise, so there is no "who else can reach this": nobody can.
+2. **What it hands strangers is problems, not access.** Every row it writes is `status: "active"`, so it lands in everyone's sets. The only thing standing between a wrong problem and a student is the pipeline's own gates — which is why they are reused and not recopied, and why `--verify claude`, one model marking its own homework, is the weak setting.
+3. **The agent is given as little as will still work.** `Read,Write,Edit` and no `Bash`, started inside the cell's own directory, and `childEnv` deletes every credential-*named* variable from what it inherits. So the author never holds `SUPABASE_SECRET_KEY`, which bypasses RLS on the answer keys, or `GEMINI_API_KEY`. Matching the name rather than listing them is the point: it already catches a `VERCEL_OIDC_TOKEN` nothing here put there, and it will catch whatever is added to `.env.local` next year. `ANTHROPIC_*`/`CLAUDE_*` are exempt — stripping those doesn't contain the child, it stops it running.
+4. **A string from the database is not trusted as a path.** `cellDir` refuses a `topics.slug` outside `[a-z0-9-]` before it can become part of an `rmSync(..., { recursive: true, force: true })`, which runs at both ends of every cell. The catalog being ours is a fact about the data today; the delete is unrecoverable on any day.
+5. **The brief quotes the pool, and the pool is not entirely ours.** `avoidList` embeds real statements so the author doesn't write them again — and a focus build's statements were steered by a student's own sentence. `buildUserMessage` caps each at 160 characters and `DRIVER_NOTE` says quoted text is material, not instruction, but **neither of those is the defence**; an instruction is poor protection against instructions. The defence is 3 above plus the fact that nothing reaches the table without passing `MixedBatchSchema`, `structuralCheck` and a solve by a model that never saw the workspace.
+
+And the workspace itself: `.seed` is gitignored because between the steps it holds answer keys in the clear, which is also why a successful cell's directory is deleted the moment its problems are safely inserted.
 
 ### Next.js 16 specifics in use
 

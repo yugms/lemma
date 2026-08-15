@@ -68,7 +68,14 @@ const FORMAT_BRIEF: Record<GenerationKind, string> = {
     "graph (produce a curve): describe a target curve in words in the statement, and give it in `target_curve`. The student positions a curve to match, so `plot` should show the grid and any reference the question mentions — never the target curve itself",
 };
 
-function buildUserMessage(req: GenerationRequest, mix: Map<GenerationKind, number>): string {
+/**
+ * Exported for `src/tools/seed-pool`, which authors pool problems offline and
+ * has to ask for them in exactly these words. A brief that paraphrased this
+ * would be seeding the pool against a different specification than the one the
+ * live pipeline authors and verifies against — and the drift would only ever
+ * show up as pool problems that feel unlike the rest.
+ */
+export function buildUserMessage(req: GenerationRequest, mix: Map<GenerationKind, number>): string {
   const { avoid } = req;
   const count = [...mix.values()].reduce((a, b) => a + b, 0);
   const topicLines = req.topics
@@ -187,7 +194,10 @@ function packIntoCalls(
  * three different tasks, and splitting before the division is what stops a set
  * of six graph problems being six of the same kind.
  */
-function splitAcrossKinds(count: number, formats: ProblemFormat[]): Map<GenerationKind, number> {
+export function splitAcrossKinds(
+  count: number,
+  formats: ProblemFormat[]
+): Map<GenerationKind, number> {
   const kinds = formats.flatMap(kindsForFormat);
   const plan = new Map<GenerationKind, number>();
   kinds.forEach((k, i) => {

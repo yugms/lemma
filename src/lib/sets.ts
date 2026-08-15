@@ -667,7 +667,13 @@ export async function* buildProblemSet(
   yield { type: "complete", setId: set.id };
 }
 
-async function insertProblems(
+/**
+ * Exported for `src/tools/seed-pool`, which writes into the same pool offline.
+ * The collapse below is the reason: a second writer that reimplemented this
+ * would reimplement the bug it exists to avoid, and would only find out on the
+ * one batch that happened to contain two problems sharing a hash.
+ */
+export async function insertProblems(
   db: SupabaseClient,
   rows: NewProblemRow[]
 ): Promise<{ id: string; statement: string }[]> {
