@@ -77,6 +77,8 @@ npm run seed -- auto --verify claude --equivalence claude
 
 The requests `gemini` verification costs are worth putting next to what they buy: a pool problem is authored once and reused for as long as it lives, against the five requests a build spends every time it has to write one from scratch.
 
+One asymmetry between them is worth knowing, because it looked like a Claude failure and wasn't. `SolverResultSchema` marks eleven fields nullable and none optional, so a result has to carry `chosen_pairs`, `chosen_curve` and six others even on a problem where they mean nothing. Gemini cannot leave one out — the structured-output API constrains what it writes — but a checker writing the file by hand reasonably omits them, and the whole batch was then rejected over blank fields rather than a wrong answer. `fillOmittedNulls` supplies them at read time, on the same principle as `stamped()`: what the reader can fill in, it fills in rather than asking for and then complaining about. It only fills fields that are *absent*, and the fields that say whether a solve happened at all — the answer, `is_well_posed`, `problem_number` — aren't nullable, so they can't be filled and a result missing one still fails.
+
 ### Which Claude
 
 `--model` sets the model for both subprocesses; `--author-model` and `--check-model` override it for one each. Unset, they inherit whatever the `claude` CLI is configured to use.

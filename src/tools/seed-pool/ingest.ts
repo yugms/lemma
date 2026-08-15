@@ -24,7 +24,7 @@ import { insertProblems, rowFromGenerated } from "@/lib/sets";
 import { adjudicateWithClaude } from "@/tools/seed-pool/adjudicate";
 import { loadAuthored, reportDropped } from "@/tools/seed-pool/authored";
 import { attemptCap } from "@/tools/seed-pool/claude-cli";
-import { assertSolvedMatchesBrief } from "@/tools/seed-pool/solve";
+import { assertSolvedMatchesBrief, fillOmittedNulls } from "@/tools/seed-pool/solve";
 import {
   FILES,
   readJson,
@@ -268,7 +268,7 @@ export async function runIngest(db: SupabaseClient, opts: IngestOptions): Promis
     FILES.solved,
     `write it from ${dir}/${FILES.solvingBrief}`
   );
-  const parsed = SolvedBatchSchema.safeParse(rawSolved);
+  const parsed = SolvedBatchSchema.safeParse(fillOmittedNulls(rawSolved));
   if (!parsed.success) {
     throw new Error(
       `${dir}/${FILES.solved} does not match the solver schema: ${schemaComplaint(parsed.error)}`

@@ -14,7 +14,7 @@
 import { createHash } from "node:crypto";
 import { SOLVER_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { jsonSchemaFor } from "@/lib/ai/provider";
-import { SolvedBatchSchema, type TaggedProblem } from "@/lib/ai/schemas";
+import { SolvedBatchSchema, SolverResultSchema, type TaggedProblem } from "@/lib/ai/schemas";
 import { solverPrompt } from "@/lib/ai/verify";
 import { loadAuthored, reportDropped } from "@/tools/seed-pool/authored";
 import {
@@ -74,6 +74,60 @@ export function assertSolvedMatchesBrief(dir: string, problems: TaggedProblem[])
         `problem against its neighbour's answer. Re-run \`npm run seed -- solve\` and solve the new brief.`
     );
   }
+}
+
+/**
+ * The fields a result may leave out, derived from the schema rather than listed.
+ *
+ * Asking the schema which of its own fields accept `null` means a field added to
+ * `SolverResultSchema` later is covered without anyone remembering to come here,
+ * and the ones that are genuinely required on every solve — `problem_number`,
+ * the answer, `is_well_posed` — are excluded by construction rather than by a
+ * list that could disagree with the schema.
+ */
+const OMITTABLE_KEYS = Object.entries(SolverResultSchema.shape)
+  .filter(([, field]) => field.safeParse(null).success)
+  .map(([key]) => key);
+
+/**
+ * Fill in the fields a hand-written solve left out, as `null`.
+ *
+ * `SolverResultSchema` marks eleven fields nullable but none optional, so a
+ * result must carry `chosen_pairs`, `chosen_points`, `chosen_curve` and five
+ * others even when the problem is a piece of algebra with a single answer.
+ * Against the provider that costs nothing: Gemini's structured output *cannot*
+ * omit a required field, because the API constrains what it writes. A checker
+ * writing the file by hand under `--verify claude` is on the honour system, and
+ * it does the reasonable thing — it leaves out seven fields that mean nothing
+ * for the problem in front of it, and the whole batch is rejected over a form
+ * with blanks in it rather than over a single wrong answer. That was the most
+ * common way `--verify claude` lost a cell.
+ *
+ * Fixed here rather than in the schema, because the schema is also what the live
+ * pipeline sends Gemini: making those fields optional there would let a real
+ * solve come back silently missing its answer. And fixed here rather than by
+ * asking harder in the brief, on the same reasoning as `stamped()` — what the
+ * reader can supply, it supplies, instead of requesting it and then complaining.
+ *
+ * Only absent keys are touched. A field the checker actually filled in is left
+ * exactly as written, so nothing here can turn a wrong answer into a valid one.
+ */
+export function fillOmittedNulls(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const results = (raw as { results?: unknown }).results;
+  if (!Array.isArray(results)) return raw;
+
+  return {
+    ...raw,
+    results: results.map((result) => {
+      if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
+      const filled = { ...(result as Record<string, unknown>) };
+      for (const key of OMITTABLE_KEYS) {
+        if (filled[key] === undefined) filled[key] = null;
+      }
+      return filled;
+    }),
+  };
 }
 
 /**
@@ -147,6 +201,10 @@ Write \`${at(FILES.solved)}\` as one JSON object matching
 not the position in your array. It is checked rather than trusted: a number out
 of range or used twice is dropped, and a problem left unclaimed is reported and
 skipped rather than paired with its neighbour's solution.
+
+Most of the answer fields apply to one format each — \`chosen_pairs\` to
+matching, \`chosen_curve\` to sketching, and so on. Write \`null\` for the ones
+your problem doesn't use, or leave them out; both are read the same way.
 `;
 
   return { brief, path: writeFile(dir, FILES.solvingBrief, brief) };
