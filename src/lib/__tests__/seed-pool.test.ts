@@ -2,13 +2,17 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { SolverResult } from "@/lib/ai/schemas";
+import { SolvedBatchSchema, type SolverResult } from "@/lib/ai/schemas";
 import { verdictsFor, writeEquivalenceBrief } from "@/tools/seed-pool/adjudicate";
 import { normalizeAuthored } from "@/tools/seed-pool/authored";
 import { cellDir, pickCells, rotate } from "@/tools/seed-pool/auto";
 import { attemptCap, childEnv } from "@/tools/seed-pool/claude-cli";
 import { loadCatalog, type PoolRow, type TopicRow } from "@/tools/seed-pool/plan";
-import { assertSolvedMatchesBrief, writeSolvingBrief } from "@/tools/seed-pool/solve";
+import {
+  assertSolvedMatchesBrief,
+  fillOmittedNulls,
+  writeSolvingBrief,
+} from "@/tools/seed-pool/solve";
 import {
   deferringEquivalence,
   equivalenceKey,
@@ -723,6 +727,82 @@ describe("assertSolvedMatchesBrief", () => {
   // wrong answer key stamped `verified`.
   it("refuses a workspace with no manifest at all", () => {
     expect(() => assertSolvedMatchesBrief(dir(), batch(2))).toThrow(/is missing/);
+  });
+});
+
+/**
+ * The gap between what the schema requires and what a hand-written file
+ * contains.
+ *
+ * Gemini cannot omit a required field — the API constrains what it writes — so
+ * this only ever bit `--verify claude`, where it was the most common way a cell
+ * was lost. The tests that matter are the two at the end: filling must not
+ * invent an answer, and must not resurrect a result that is genuinely unusable.
+ */
+describe("fillOmittedNulls", () => {
+  // What a checker naturally writes for an open-answer problem: the seven
+  // fields belonging to multiple-choice, ordering, matching, multi-part and
+  // graph formats are simply absent.
+  const natural = {
+    results: [
+      {
+        problem_number: 1,
+        reasoning_summary: "Factored the quadratic.",
+        final_answer_latex: "(x+2)(x+3)",
+        final_answer_numeric: null,
+        is_well_posed: true,
+        issue: null,
+        difficulty_estimate: 3,
+      },
+    ],
+  };
+
+  it("is what the schema rejects without it", () => {
+    expect(SolvedBatchSchema.safeParse(natural).success).toBe(false);
+  });
+
+  it("lets the same file through once the absent fields are filled", () => {
+    const parsed = SolvedBatchSchema.safeParse(fillOmittedNulls(natural));
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.results[0].final_answer_latex).toBe("(x+2)(x+3)");
+    expect(parsed.success && parsed.data.results[0].chosen_pairs).toBeNull();
+  });
+
+  it("leaves a field the checker actually answered alone", () => {
+    const answered = {
+      results: [{ ...natural.results[0], chosen_choice_id: "B", final_answer_latex: "B" }],
+    };
+    const parsed = SolvedBatchSchema.safeParse(fillOmittedNulls(answered));
+    expect(parsed.success && parsed.data.results[0].chosen_choice_id).toBe("B");
+  });
+
+  /**
+   * The fields that decide whether a solve happened at all are not nullable, so
+   * they are not fillable either. A result missing its answer still fails, which
+   * is the line between forgiving a form with blanks in it and accepting a
+   * checker that did no work.
+   */
+  it("cannot conjure an answer, a verdict or a problem number", () => {
+    for (const missing of [
+      "final_answer_latex",
+      "reasoning_summary",
+      "is_well_posed",
+      "difficulty_estimate",
+      "problem_number",
+    ] as const) {
+      const rest: Record<string, unknown> = { ...natural.results[0] };
+      delete rest[missing];
+      const parsed = SolvedBatchSchema.safeParse(fillOmittedNulls({ results: [rest] }));
+      expect(parsed.success, `${missing} must stay required`).toBe(false);
+    }
+  });
+
+  // Anything that isn't the expected shape is handed to the schema untouched,
+  // so the error names what is actually wrong with the file.
+  it("passes a file that isn't a batch of results straight through", () => {
+    for (const raw of [null, 42, "nope", { results: "not an array" }, { results: [7] }]) {
+      expect(fillOmittedNulls(raw)).toEqual(raw);
+    }
   });
 });
 

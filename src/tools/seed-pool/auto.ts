@@ -70,7 +70,7 @@ import {
   type PoolRow,
   type TopicRow,
 } from "@/tools/seed-pool/plan";
-import { writeSolvingBrief } from "@/tools/seed-pool/solve";
+import { fillOmittedNulls, writeSolvingBrief } from "@/tools/seed-pool/solve";
 import { FILES, readJsonIfPresent, schemaComplaint } from "@/tools/seed-pool/shared";
 
 export type Cell = { topic: TopicRow; difficulty: number; depth: number };
@@ -386,7 +386,7 @@ async function solveWithClaude(
     log(`    checker ${run.ok ? `wrote no ${FILES.solved}` : run.detail}`);
     return null;
   }
-  const parsed = SolvedBatchSchema.safeParse(raw);
+  const parsed = SolvedBatchSchema.safeParse(fillOmittedNulls(raw));
   if (!parsed.success) {
     // Named, because this is the most common way `--verify claude` loses a cell
     // and the workspace that would explain it is cleared by the next attempt on
